@@ -236,6 +236,7 @@ le Play Store : affichage bord à bord sur tous les écrans et geste retour pré
 ```bash
 ./gradlew testDebugUnitTest   # tests unitaires (parseur SIRI, sens, référentiel, clients PRIM et Tracéo)
 ./gradlew assembleRelease     # APK : app/build/outputs/apk/release/app-release.apk
+./gradlew bundleRelease       # bundle Google Play : app/build/outputs/bundle/release/app-release.aab
 ```
 
 ### Signature
@@ -265,7 +266,11 @@ Sans ces secrets (par exemple pour une pull request venant d'un fork), la CI pro
 de debug ; un tag `v*` échoue volontairement plutôt que de publier un APK non signé.
 
 Le workflow GitHub Actions `.github/workflows/android.yml` exécute les tests, construit l'APK à chaque
-push (artefact téléchargeable) et publie une release pour chaque tag `v*`.
+push (artefact téléchargeable) et publie une release pour chaque tag `v*`. Quand la clé est disponible,
+il construit aussi le bundle signé `TraceoLive-X.Y.Z-<commit>.aab` (artefact `TraceoLive-aab`), joint à
+la release : c'est le fichier à importer dans la Play Console. La clé de release sert alors de clé
+d'importation, et Google Play signe l'application avec sa propre clé (signature d'application par
+Google Play).
 
 ## Licence
 

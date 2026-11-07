@@ -51,15 +51,19 @@ jobs:
           RELEASE_KEY_PASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
         run: |
           chmod +x gradlew
-          if [ "${{ steps.signing.outputs.signed }}" = "true" ]; then TASK=assembleRelease; else TASK=assembleDebug; fi
-          ./gradlew --no-daemon --stacktrace testDebugUnitTest "$TASK"
+          # Signé, on produit aussi le bundle (.aab) que demande Google Play.
+          if [ "${{ steps.signing.outputs.signed }}" = "true" ]; then TASKS="assembleRelease bundleRelease"; else TASKS=assembleDebug; fi
+          ./gradlew --no-daemon --stacktrace testDebugUnitTest $TASKS
 
-      - name: Renommer l'APK
+      - name: Renommer l'APK et le bundle
         id: apk
         run: |
           VERSION=$(grep -oP 'versionName = "\K[^"]+' app/build.gradle.kts)
           if [ "${{ steps.signing.outputs.signed }}" = "true" ]; then
             SRC=app/build/outputs/apk/release/app-release.apk; SUFFIX=""
+            AAB="TraceoLive-${VERSION}-${GITHUB_SHA::7}.aab"
+            cp app/build/outputs/bundle/release/app-release.aab "$AAB"
+            echo "aab=$AAB" >> "$GITHUB_OUTPUT"
           else
             SRC=app/build/outputs/apk/debug/app-debug.apk; SUFFIX="-debug"
           fi
@@ -73,6 +77,14 @@ jobs:
           path: ${{ steps.apk.outputs.name }}
           if-no-files-found: error
 
+      - name: Bundle pour Google Play
+        if: steps.apk.outputs.aab != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: TraceoLive-aab
+          path: ${{ steps.apk.outputs.aab }}
+          if-no-files-found: error
+
       - name: Rapport des tests
         if: failure()
         uses: actions/upload-artifact@v4
@@ -84,5 +96,7 @@ jobs:
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v2
         with:
-          files: ${{ steps.apk.outputs.name }}
+          files: |
+            ${{ steps.apk.outputs.name }}
+            ${{ steps.apk.outputs.aab }}
           generate_release_notes: true
