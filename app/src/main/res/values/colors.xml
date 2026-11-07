@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <color name="ic_launcher_background">#0A4D8C</color>
+    <!-- Crème de la charte Tracéo -->
+    <color name="ic_launcher_background">#FAF6F2</color>
 
     <!-- Les écrans reprennent les teintes des widgets : seules les lignes apportent de la couleur. -->
     <color name="screen_background">#ECEBE4</color>
