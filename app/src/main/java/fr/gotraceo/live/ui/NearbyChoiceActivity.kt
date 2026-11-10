@@ -33,6 +33,7 @@ import fr.gotraceo.live.widget.WidgetProviders
 import fr.gotraceo.live.widget.WidgetUpdater
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.MainScope
+import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
@@ -135,9 +136,13 @@ class NearbyChoiceActivity : Activity() {
     }
 
     private fun choose(nearby: NearbyLine) {
+        // Un second toucher pendant que le premier choix s'enregistre ne le double pas.
+        if (chosen) return
         chosen = true
         scope.launch {
-            AutoMode.choose(this@NearbyChoiceActivity, widgetId, nearby)
+            // Le choix va au bout même si la feuille est fermée entre-temps : sinon le lieu serait
+            // retenu sans que le widget change, et sans l'actualisation faite quand on ne choisit rien.
+            withContext(NonCancellable) { AutoMode.choose(applicationContext, widgetId, nearby) }
             finish()
         }
     }
