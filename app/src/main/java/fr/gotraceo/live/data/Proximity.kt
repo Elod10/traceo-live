@@ -88,11 +88,7 @@ object Proximity {
     /** Passages conservés par ligne : de quoi recalculer les attentes entre deux actualisations. */
     const val MAX_STORED_DEPARTURES = 6
 
-    /** Passé ce délai, un train « à quai » est parti : le suivant prend sa place sans attendre la mise à jour. */
-    private const val AT_STOP_GRACE_MS = 2L * 60 * 1000
-
-    fun upcoming(departures: List<Departure>, now: Long): List<Departure> =
-        Directions.upcoming(departures, now).filter { !it.atStop || (it.leaveTime ?: now) >= now - AT_STOP_GRACE_MS }
+    fun upcoming(departures: List<Departure>, now: Long): List<Departure> = Directions.upcoming(departures, now)
 
     fun hasPassageSoon(departures: List<Departure>, now: Long): Boolean {
         val limit = now + NearbyRules.ACTIVE_WITHIN_MINUTES * 60_000L

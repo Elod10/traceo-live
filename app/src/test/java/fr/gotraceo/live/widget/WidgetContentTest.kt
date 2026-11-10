@@ -481,6 +481,17 @@ class WidgetContentTest {
     ) = WidgetModels.build(config, state, hasApiKey, refreshing = false, widthDp = width, heightDp = height, now = now)
 
     @Test
+    fun aVehicleLongGoneDoesNotStayAtThePlatformOnAWidgetThatCannotRefresh() {
+        // Dernier relevé il y a longtemps : le métro « à quai » est parti, le suivant passe en tête.
+        val stale = model(config(metro, oneDirection), state(dep("Château de Vincennes", -3, atStop = true), dep("Château de Vincennes", 4)))
+        assertEquals(listOf(WaitKind.MINUTES), stale.passages.map { it.kind })
+        assertEquals(4, stale.passages.single().minutes)
+        // Tout juste à quai, il reste affiché.
+        val fresh = model(config(metro, oneDirection), state(dep("Château de Vincennes", -1, atStop = true), dep("Château de Vincennes", 4)))
+        assertEquals(listOf(WaitKind.AT_STOP, WaitKind.MINUTES), fresh.passages.map { it.kind })
+    }
+
+    @Test
     fun noticesWhenThereIsNothingToShow() {
         assertEquals(NoticeKind.NOT_CONFIGURED, model(null, null).notice?.kind)
         assertEquals(NoticeKind.RECONFIGURE, model(config(metro, allDirections), state(dep("A", 2)), hasApiKey = false).notice?.kind)

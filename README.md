@@ -70,7 +70,8 @@ viennent toujours de **PRIM**, la plateforme d'Île-de-France Mobilités, par l'
 
   Le temps d'attente indique « 3 min », « Imminent », « À quai » ou « Supprimé » ; les retards et
   les échecs d'actualisation sont signalés en couleur. La liste affiche aussi l'heure, la voie (avec
-  une clé) et le code mission des trains.
+  une clé) et le code mission des trains. Un véhicule « À quai » cède sa place au suivant 2 minutes
+  après son heure, même si le widget n'a pas pu s'actualiser entre-temps.
 
   Le lanceur reçoit chaque widget dans ses deux tailles, portrait et paysage, et affiche celle de sa
   propre orientation : le widget ne dépend pas de l'orientation de l'application au premier plan.
