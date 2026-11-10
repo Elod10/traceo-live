@@ -102,6 +102,8 @@ class KeyActivity : Activity() {
         prefs.apiKey = key
         showStatus(getString(if (key.isEmpty()) R.string.main_key_removed else R.string.main_key_saved), error = false)
         if (changed) {
+            // Le quota appartient à la clé : celui qu'une autre clé a épuisé ne doit pas suspendre celle-ci.
+            prefs.resetPrimUsage()
             WidgetUpdater.renderAll(this)
             WidgetUpdater.requestRefresh(this)
         }
