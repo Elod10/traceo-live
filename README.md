@@ -93,6 +93,15 @@ viennent toujours de **PRIM**, la plateforme d'Île-de-France Mobilités, par l'
     d'Android 14, l'appli la propose à l'enregistrement de chaque nouveau widget tant
     qu'elle manque, et une carte de l'accueil y mène. Sans elle, le tick reste approximatif et
     les temps d'attente peuvent avoir plusieurs minutes de retard.
+  - **Tick** : l'alarme de chaque minute est à usage unique, et l'application la reprogramme avant tout
+    travail, à la fin de chaque actualisation et à l'ouverture de l'application. Si elle se perd quand
+    même (processus tué pendant un tick), une alarme répétée toutes les 3 minutes, que chaque tick
+    repousse et qu'Android reprogramme lui-même, la relance. Les widgets À proximité et les widgets
+    d'une ligne s'actualisent en parallèle : une source lente pour les uns ne retarde pas les autres.
+  - **Toucher** : Android livre le toucher d'un widget en broadcast prioritaire et tue sans prévenir
+    l'application qui le garde plus de 10 s. Elle le rend donc au bout de 7 s au plus (40 s pour un
+    tick, qui en a 60) ; si le réseau traîne, l'actualisation se termine en dehors, et le widget quitte
+    « … » pour son dernier état connu en attendant.
   - **Calage sur Tracéo** : sans clé, chaque réponse annonce l'heure du prochain relevé (`nextAt`) ; les
     widgets attendent ce relevé au lieu d'interroger à heure fixe, au plus une fois toutes les 30 s.
   - **Étalement** : chaque installation tire au hasard un décalage de 2 à 40 s, ajouté au `nextAt` et

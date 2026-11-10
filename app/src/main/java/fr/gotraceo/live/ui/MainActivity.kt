@@ -89,6 +89,9 @@ class MainActivity : Activity() {
         prefs.registerWidgetsListener(widgetsListener)
         refreshWidgetList()
         handler.postDelayed(tick, TICK_MS)
+        // Ouvrir l'application remet les widgets à jour : ceux qui sont dus sont actualisés, et le tick
+        // repart s'il s'était arrêté.
+        WidgetUpdater.requestTick(this)
     }
 
     override fun onPause() {

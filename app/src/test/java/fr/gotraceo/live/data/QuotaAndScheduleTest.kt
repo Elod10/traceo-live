@@ -161,4 +161,32 @@ class QuotaAndScheduleTest {
         assertEquals(byInterval, RefreshSchedule.dueAt(T0, 2, true, null, 5_000L))
         assertEquals(byInterval, RefreshSchedule.dueAt(T0, 2, true, 0L, 5_000L))
     }
+
+    // --- Tick et broadcasts ---------------------------------------------------------------------
+
+    @Test
+    fun aBroadcastIsHandedBackBeforeAndroidKillsTheApp() {
+        // Android accorde 10 s au récepteur d'un broadcast prioritaire, 60 s aux autres, puis tue
+        // l'application sans prévenir. Un toucher de widget arrive en broadcast prioritaire.
+        assertTrue(RefreshSchedule.broadcastBudgetMs(userAction = true, foreground = false) < 10_000L)
+        assertTrue(RefreshSchedule.broadcastBudgetMs(userAction = false, foreground = true) < 10_000L)
+        assertTrue(RefreshSchedule.broadcastBudgetMs(userAction = true, foreground = true) < 10_000L)
+        assertTrue(RefreshSchedule.broadcastBudgetMs(userAction = false, foreground = false) < 60_000L)
+    }
+
+    @Test
+    fun aTickKeepsEnoughTimeForASlowRequest() {
+        // Connexion (8 s) puis lecture (12 s) : une requête lente doit pouvoir finir dans le broadcast du tick.
+        assertTrue(RefreshSchedule.broadcastBudgetMs(userAction = false, foreground = false) >= 20_000L)
+    }
+
+    @Test
+    fun theSafetyNetStaysBehindTheTick() {
+        // Chaque tick repousse le filet d'une période. Elle dépasse nettement la minute qui sépare deux
+        // ticks : le filet ne part donc que si les ticks se sont arrêtés.
+        assertTrue(RefreshSchedule.WATCHDOG_INTERVAL_MS >= 2 * MINUTE)
+        val tick = RefreshSchedule.nextTickAt(T0, 17_000L)
+        assertTrue(tick - T0 <= MINUTE)
+        assertTrue(T0 + RefreshSchedule.WATCHDOG_INTERVAL_MS > tick + MINUTE)
+    }
 }
