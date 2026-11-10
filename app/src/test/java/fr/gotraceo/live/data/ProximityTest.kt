@@ -231,6 +231,22 @@ class ProximityTest {
         assertEquals(1, calls)
     }
 
+    @Test
+    fun withAKeyTwoZonesAreAskedAtTheSameTime() {
+        // Chaque zone attend que l'autre soit demandée aussi : possible seulement si les deux requêtes
+        // sont en cours ensemble, pas si l'une attend la fin de l'autre.
+        val bothAsked = java.util.concurrent.CyclicBarrier(2)
+        val source = PrimZonePassages { _ ->
+            bothAsked.await(5, java.util.concurrent.TimeUnit.SECONDS)
+            listOf(dep(2, lineRef = "STIF:Line::C1:"))
+        }
+        val results = java.util.Collections.synchronizedList(ArrayList<Result<PassageSnapshot>>())
+        val threads = listOf("71673", "99").map { zone -> kotlin.concurrent.thread { results += source.passages(near("1", zone)) } }
+        threads.forEach { it.join(10_000L) }
+        assertEquals(2, results.size)
+        assertTrue(results.all { it.isSuccess })
+    }
+
     // --- Échecs réseau et enregistrement -------------------------------------------------------------
 
     @Test

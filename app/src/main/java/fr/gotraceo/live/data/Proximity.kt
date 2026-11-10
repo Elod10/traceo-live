@@ -2,6 +2,7 @@ package fr.gotraceo.live.data
 
 import org.json.JSONArray
 import org.json.JSONObject
+import java.util.concurrent.ConcurrentHashMap
 import kotlin.math.min
 
 // Règles du format À proximité : plusieurs lignes, avec leurs passages dans les deux sens.
@@ -181,12 +182,12 @@ object Proximity {
  */
 class PrimZonePassages(private val zoneDepartures: (String) -> List<Departure>) {
 
-    private val zones = HashMap<String, Result<List<Departure>>>()
+    // Une requête par zone, partagée entre ses lignes. Le verrou est celui de la zone : deux zones
+    // demandées en même temps ne s'attendent pas l'une l'autre.
+    private val zones = ConcurrentHashMap<String, Lazy<Result<List<Departure>>>>()
 
     fun passages(nearby: NearbyLine): Result<PassageSnapshot> {
-        val zone = synchronized(zones) {
-            zones.getOrPut(nearby.stopId) { runCatching { zoneDepartures(nearby.stopId) } }
-        }
+        val zone = zones.getOrPut(nearby.stopId) { lazy { runCatching { zoneDepartures(nearby.stopId) } } }.value
         return zone.map { departures ->
             PassageSnapshot(departures.filter { PrimClient.lineMatches(it.lineRef, nearby.line.id) })
         }
