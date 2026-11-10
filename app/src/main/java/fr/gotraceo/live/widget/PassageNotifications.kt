@@ -109,12 +109,15 @@ object PassageNotifications {
      */
     fun onDismissed(context: Context, widgetId: Int) {
         val prefs = Prefs(context)
-        val end = prefs.timeWindow(widgetId)?.currentEnd(ZonedDateTime.now())
-        if (end != null) {
-            prefs.hideNotifyUntil(widgetId, end.toInstant().toEpochMilli())
-        } else {
+        val window = prefs.timeWindow(widgetId)
+        if (window == null) {
             prefs.setNotifies(widgetId, false)
+            return
         }
+        // Balayée juste après la fin de la plage, avant que le tick ne la retire : rien à masquer,
+        // et surtout pas l'option à désactiver, puisqu'elle doit revenir à la plage suivante.
+        val end = window.currentEnd(ZonedDateTime.now()) ?: return
+        prefs.hideNotifyUntil(widgetId, end.toInstant().toEpochMilli())
     }
 
     private fun build(context: Context, prefs: Prefs, widgetId: Int): Notification? {
