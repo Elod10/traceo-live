@@ -71,6 +71,11 @@ viennent toujours de **PRIM**, la plateforme d'Île-de-France Mobilités, par l'
   Le temps d'attente indique « 3 min », « Imminent », « À quai » ou « Supprimé » ; les retards et
   les échecs d'actualisation sont signalés en couleur. La liste affiche aussi l'heure, la voie (avec
   une clé) et le code mission des trains.
+
+  Quand la hauteur manque (widget rétréci à une rangée, écran d'accueil en paysage), un format sur deux
+  rangées cède la place à son équivalent sur une rangée, celui que le widget Automatique choisirait :
+  Grand chiffre devient Frise ou Un sens, Deux sens et Deux sens avec frise deviennent Deux sens compact
+  ou Un sens. Train et voie et Liste des départs rétrécissent d'abord, pour garder la voie et la liste.
 - **Relevé daté** : sans clé, le widget indique l'heure du relevé de Tracéo, pas celle du téléphone, avec
   la mention « PRIM via Tracéo » si la place le permet, sinon « Tracéo ». Il signale un relevé ancien
   (plus de 150 s, ce qui est normal entre 2 h et 5 h). Le format Pastille manque de place : il n'indique

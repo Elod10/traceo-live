@@ -153,6 +153,66 @@ class WidgetContentTest {
     }
 
     @Test
+    fun aTallFormatTooShortGivesWayToItsOneRowEquivalent() {
+        fun fitting(format: WidgetFormat, w: Float, h: Float, single: Boolean = false) = format.fitting(w, h, single)
+
+        // À sa taille, ou un peu rétréci, chaque format garde son dessin.
+        WidgetFormat.entries.forEach { assertEquals(it, fitting(it, it.baseWidth, it.baseHeight)) }
+        assertEquals(WidgetFormat.DEUX_SENS_LARGE, fitting(WidgetFormat.DEUX_SENS_LARGE, 348f, 150f))
+        // Écran d'accueil en paysage : deux rangées y sont moins hautes qu'une seule en portrait.
+        assertEquals(WidgetFormat.COMPACT, fitting(WidgetFormat.DEUX_SENS_LARGE, 650f, 120f))
+        assertEquals(WidgetFormat.COMPACT, fitting(WidgetFormat.DEUX_SENS, 320f, 120f))
+        assertEquals(WidgetFormat.FRISE, fitting(WidgetFormat.GRAND_CHIFFRE, 320f, 120f, single = true))
+        // Widget rétréci à une rangée en portrait : trop étroit pour deux sens, comme l'entrée automatique.
+        assertEquals(WidgetFormat.COMPACT, fitting(WidgetFormat.DEUX_SENS_LARGE, 348f, 110f))
+        assertEquals(WidgetFormat.UN_SENS, fitting(WidgetFormat.DEUX_SENS, 172f, 110f))
+        assertEquals(WidgetFormat.UN_SENS, fitting(WidgetFormat.GRAND_CHIFFRE, 172f, 110f, single = true))
+    }
+
+    @Test
+    fun theTrackAndTheListShrinkFurtherBeforeGivingWay() {
+        // Ni la voie ni la liste des départs n'ont d'équivalent sur une rangée.
+        assertEquals(WidgetFormat.TRAIN, WidgetFormat.TRAIN.fitting(320f, 120f, singleDirection = true))
+        assertEquals(WidgetFormat.TRAIN, WidgetFormat.TRAIN.fitting(172f, 103f, singleDirection = true))
+        assertEquals(WidgetFormat.UN_SENS, WidgetFormat.TRAIN.fitting(172f, 100f, singleDirection = true))
+        assertEquals(WidgetFormat.LISTE, WidgetFormat.LISTE.fitting(650f, 120f, singleDirection = false))
+        assertEquals(WidgetFormat.LISTE, WidgetFormat.LISTE.fitting(348f, 92f, singleDirection = false))
+        assertEquals(WidgetFormat.COMPACT, WidgetFormat.LISTE.fitting(348f, 85f, singleDirection = false))
+        assertEquals(WidgetFormat.FRISE, WidgetFormat.LISTE.fitting(348f, 85f, singleDirection = true))
+        assertEquals(WidgetFormat.UN_SENS, WidgetFormat.LISTE.fitting(180f, 85f, singleDirection = false))
+    }
+
+    @Test
+    fun formatsOnOneRowAndTheNearbyFormatNeverGiveWay() {
+        listOf(WidgetFormat.PASTILLE, WidgetFormat.UN_SENS, WidgetFormat.FRISE, WidgetFormat.COMPACT, WidgetFormat.PROXIMITE)
+            .forEach { assertEquals(it, it.fitting(650f, 40f, singleDirection = false)) }
+    }
+
+    @Test
+    fun theDrawingShrinksRatherThanOverflowWhenTheHeightIsShort() {
+        // Dans ses limites habituelles, l'échelle ne change pas.
+        assertEquals(1f, WidgetFormat.DEUX_SENS_LARGE.sceneScale(348f, 192f), 0.001f)
+        assertEquals(0.75f, WidgetFormat.DEUX_SENS_LARGE.sceneScale(250f, 192f), 0.001f)
+        assertEquals(1.6f, WidgetFormat.PASTILLE.sceneScale(400f, 400f), 0.001f)
+        // La liste tient encore à 110 dp de haut : elle garde son échelle et montre moins de départs.
+        assertEquals(0.75f, WidgetFormat.LISTE.sceneScale(348f, 110f), 0.001f)
+        // Une frise sur une rangée d'un écran en paysage (55 dp) : tout le dessin (92 dp) tient.
+        val scale = WidgetFormat.FRISE.sceneScale(650f, 55f)
+        assertEquals(92f, 55f / scale, 0.5f)
+        // Plus bas encore, le dessin ne rétrécit plus : il deviendrait illisible.
+        assertEquals(0.5f, WidgetFormat.FRISE.sceneScale(650f, 30f), 0.001f)
+    }
+
+    @Test
+    fun theChosenFormatIsDrawnAsItsEquivalentWhenItCannotFit() {
+        val model = WidgetModels.build(
+            config(metro, allDirections), state(dep("A", 5), dep("B", 7, stopId = "IDFM:2")), hasApiKey = true,
+            refreshing = false, widthDp = 650f, heightDp = 120f, now = now, fixedFormat = WidgetFormat.DEUX_SENS_LARGE,
+        )
+        assertEquals(WidgetFormat.COMPACT, model.format)
+    }
+
+    @Test
     fun twoDirectionFormatsAreIdentified() {
         val both = WidgetFormat.entries.filter { it.showsBothDirections }
         assertEquals(
