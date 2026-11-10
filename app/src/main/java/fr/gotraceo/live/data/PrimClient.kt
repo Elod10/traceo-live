@@ -173,6 +173,14 @@ class PrimClient(
             Http.get(url, mapOf("apikey" to apiKey.trim()))
         } catch (e: IOException) {
             throw PrimException(PrimException.Kind.NETWORK, "Erreur réseau : ${e.message ?: e.javaClass.simpleName}", e)
+        } catch (e: IllegalArgumentException) {
+            // Un caractère invisible collé avec la clé (espace insécable, saut de ligne) n'entre pas
+            // dans un en-tête HTTP : la requête n'est même pas envoyée.
+            throw PrimException(
+                PrimException.Kind.AUTH,
+                "Clé API illisible : elle contient un caractère qui ne peut pas être envoyé. Collez-la à nouveau.",
+                e,
+            )
         }
 
         usage.onResponse(
