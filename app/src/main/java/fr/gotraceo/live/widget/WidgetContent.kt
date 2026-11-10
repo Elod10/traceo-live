@@ -125,6 +125,47 @@ enum class WidgetFormat(
     }
 }
 
+/** Taille d'un widget, en dp. */
+data class WidgetSize(val width: Float, val height: Float)
+
+/**
+ * Les deux tailles qu'un lanceur donne à un widget : en portrait et en paysage.
+ *
+ * Le widget ne sait pas dans quel sens son lanceur est tourné : l'orientation que voit
+ * l'application est celle de l'écran, donc de l'application au premier plan, pas celle de l'écran
+ * d'accueil. Il lui envoie les deux dessins, et le lanceur prend celui de sa propre orientation.
+ */
+data class WidgetSizes(val portrait: WidgetSize, val landscape: WidgetSize) {
+
+    /** La taille en paysage, quand elle diffère de celle en portrait. */
+    val otherLandscape: WidgetSize? get() = landscape.takeIf { it != portrait }
+
+    companion object {
+        const val DEFAULT_WIDTH_DP = 348f
+        const val DEFAULT_HEIGHT_DP = 192f
+
+        /**
+         * À partir des options du widget (AppWidgetManager.OPTION_APPWIDGET_…) : la largeur minimale
+         * et la hauteur maximale sont celles du portrait, les deux autres celles du paysage. Une
+         * valeur absente est remplacée par celle de l'autre orientation, puis par la maquette.
+         */
+        fun of(minWidth: Int, maxWidth: Int, minHeight: Int, maxHeight: Int): WidgetSizes {
+            fun pick(wanted: Int, other: Int, default: Float): Float =
+                (if (wanted > 0) wanted else other).takeIf { it > 0 }?.toFloat() ?: default
+            return WidgetSizes(
+                portrait = WidgetSize(
+                    pick(minWidth, maxWidth, DEFAULT_WIDTH_DP),
+                    pick(maxHeight, minHeight, DEFAULT_HEIGHT_DP),
+                ),
+                landscape = WidgetSize(
+                    pick(maxWidth, minWidth, DEFAULT_WIDTH_DP),
+                    pick(minHeight, maxHeight, DEFAULT_HEIGHT_DP),
+                ),
+            )
+        }
+    }
+}
+
 enum class WaitKind { MINUTES, CLOCK, IMMINENT, AT_STOP, CANCELLED }
 
 /** Un passage prêt à être affiché. */

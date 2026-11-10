@@ -72,6 +72,8 @@ viennent toujours de **PRIM**, la plateforme d'Île-de-France Mobilités, par l'
   les échecs d'actualisation sont signalés en couleur. La liste affiche aussi l'heure, la voie (avec
   une clé) et le code mission des trains.
 
+  Le lanceur reçoit chaque widget dans ses deux tailles, portrait et paysage, et affiche celle de sa
+  propre orientation : le widget ne dépend pas de l'orientation de l'application au premier plan.
   Quand la hauteur manque (widget rétréci à une rangée, écran d'accueil en paysage), un format sur deux
   rangées cède la place à son équivalent sur une rangée, celui que le widget Automatique choisirait :
   Grand chiffre devient Frise ou Un sens, Deux sens et Deux sens avec frise deviennent Deux sens compact

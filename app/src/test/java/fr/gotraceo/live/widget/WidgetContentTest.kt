@@ -212,6 +212,30 @@ class WidgetContentTest {
         assertEquals(WidgetFormat.COMPACT, model.format)
     }
 
+    // --- Tailles données par le lanceur ---------------------------------------------------------
+
+    @Test
+    fun theLauncherGivesOneSizePerOrientation() {
+        // Un widget 4×2 sur un téléphone : 328×190 dp en portrait, 658×94 dp en paysage.
+        val sizes = WidgetSizes.of(minWidth = 328, maxWidth = 658, minHeight = 94, maxHeight = 190)
+        assertEquals(WidgetSize(328f, 190f), sizes.portrait)
+        assertEquals(WidgetSize(658f, 94f), sizes.landscape)
+        assertEquals(sizes.landscape, sizes.otherLandscape)
+    }
+
+    @Test
+    fun aWidgetWithASingleSizeIsDrawnOnce() {
+        assertNull(WidgetSizes.of(300, 300, 150, 150).otherLandscape)
+        // Un lanceur qui ne dit rien : la taille de la maquette.
+        val unknown = WidgetSizes.of(0, 0, 0, 0)
+        assertEquals(WidgetSize(348f, 192f), unknown.portrait)
+        assertNull(unknown.otherLandscape)
+        // Une seule orientation renseignée sert pour les deux.
+        val portraitOnly = WidgetSizes.of(minWidth = 328, maxWidth = 0, minHeight = 0, maxHeight = 190)
+        assertEquals(WidgetSize(328f, 190f), portraitOnly.landscape)
+        assertNull(portraitOnly.otherLandscape)
+    }
+
     @Test
     fun twoDirectionFormatsAreIdentified() {
         val both = WidgetFormat.entries.filter { it.showsBothDirections }

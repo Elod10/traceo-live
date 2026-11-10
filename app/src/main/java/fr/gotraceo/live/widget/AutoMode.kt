@@ -285,10 +285,11 @@ object AutoMode {
         return Proximity.visible(state.entries, System.currentTimeMillis(), rows).size < rows
     }
 
+    /** Rangées à remplir : le plus grand nombre que le widget peut montrer, en portrait ou en paysage. */
     private fun proximityRows(context: Context, widgetId: Int): Int {
         val options = AppWidgetManager.getInstance(context).getAppWidgetOptions(widgetId)
-        val (width, height) = WidgetRenderer.widgetSize(context, options)
-        return ProximityLayout.rows(width, height)
+        val sizes = WidgetRenderer.widgetSizes(options)
+        return listOf(sizes.portrait, sizes.landscape).maxOf { ProximityLayout.rows(it.width, it.height) }
     }
 
     private fun rankingEnsuringIndex(context: Context, point: GeoPoint): NearbyRanking? {
