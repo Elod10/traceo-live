@@ -102,8 +102,11 @@ class ConfigureActivity : Activity() {
 
         private val openScreens = HashMap<Int, WeakReference<ConfigureActivity>>()
 
-        /** Vrai si la configuration de ce widget est déjà à l'écran. */
-        fun isOpen(widgetId: Int): Boolean = openScreens[widgetId]?.get()?.isFinishing == false
+        /**
+         * Vrai si la configuration de ce widget est déjà à l'écran. Un écran quitté sans enregistrer
+         * (retour à l'accueil) existe encore mais ne se voit plus : il ne doit pas empêcher d'en ouvrir un autre.
+         */
+        fun isOpen(widgetId: Int): Boolean = openScreens[widgetId]?.get()?.let { !it.isFinishing && it.started } == true
     }
 
     private enum class Step { MODE, LINE, STOP, DIRECTION, AUTO, AUTO_COLOR }
@@ -142,6 +145,9 @@ class ConfigureActivity : Activity() {
 
     /** Vrai une fois « Alarmes et rappels » ouvert après l'enregistrement : le retour ferme l'écran. */
     private var awaitingAlarmAccess = false
+
+    /** Vrai entre onStart et onStop : l'écran est visible, ou sur le point de l'être. */
+    private var started = false
 
     /** Format choisi dans la liste des widgets du lanceur (null pour l'entrée automatique). */
     private val chosenFormat: WidgetFormat? by lazy {
@@ -293,6 +299,16 @@ class ConfigureActivity : Activity() {
         val footer = layoutInflater.inflate(R.layout.list_help_footer, list, false)
         footerHelp = footer.findViewById(R.id.footer_help)
         list.addFooterView(footer, null, false)
+    }
+
+    override fun onStart() {
+        super.onStart()
+        started = true
+    }
+
+    override fun onStop() {
+        started = false
+        super.onStop()
     }
 
     override fun onRestart() {
