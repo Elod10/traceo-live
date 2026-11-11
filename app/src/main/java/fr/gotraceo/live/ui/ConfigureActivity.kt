@@ -40,6 +40,7 @@ import fr.gotraceo.live.data.DirectionOption
 import fr.gotraceo.live.data.Directions
 import fr.gotraceo.live.data.GeoPoint
 import fr.gotraceo.live.data.Line
+import fr.gotraceo.live.data.NearbyLookup
 import fr.gotraceo.live.data.Network
 import fr.gotraceo.live.data.NetworkCatalog
 import fr.gotraceo.live.data.NetworkStatus
@@ -182,6 +183,9 @@ class ConfigureActivity : Activity() {
     private var autoFirst: RankedLine? = null
     private var autoItems: List<RowItem> = emptyList()
 
+    /** Réseau des lignes proches, déduit de la position : c'est le sien que cite la mention. */
+    private var autoNetwork: String? = null
+
     /** Vrai une fois « Alarmes et rappels » ouvert après l'enregistrement : le retour ferme l'écran. */
     private var awaitingAlarmAccess = false
 
@@ -229,7 +233,6 @@ class ConfigureActivity : Activity() {
     private lateinit var notifyIcon: ImageView
     private lateinit var notifySummary: TextView
     private lateinit var save: Button
-    private lateinit var dataMention: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -353,7 +356,6 @@ class ConfigureActivity : Activity() {
         notifyIcon = findViewById(R.id.notify_icon)
         notifySummary = findViewById(R.id.notify_summary)
         save = findViewById(R.id.save)
-        dataMention = findViewById(R.id.data_mention)
         findViewById<TextView>(R.id.data_mention).movementMethod = LinkMovementMethod.getInstance()
 
         val header =layoutInflater.inflate(R.layout.list_preview_header, list, false)
@@ -523,10 +525,15 @@ class ConfigureActivity : Activity() {
         colorSection.visibility = if (choosesFromList) View.GONE else View.VISIBLE
         notifySection.visibility = colorSection.visibility
         save.setText(if (choosesFromList) R.string.continue_label else R.string.save_widget)
-        // La mention est celle du réseau dont l'étape montre les données.
-        Mentions.bind(dataMention, listOf(network.id))
+        bindMention()
         if (step == Step.DIRECTION || step == Step.AUTO_COLOR) renderSwatches()
         hideKeyboard()
+    }
+
+    /** La mention est celle du réseau dont l'étape montre les données : en automatique, celui de la position. */
+    private fun bindMention() {
+        val automatic = step == Step.AUTO || step == Step.AUTO_COLOR
+        Mentions.bind(findViewById(R.id.data_mention), listOf(autoNetwork.takeIf { automatic } ?: network.id))
     }
 
     private fun showCrumb(badge: Line?, text: String) {
@@ -859,6 +866,7 @@ class ConfigureActivity : Activity() {
 
     private fun startAuto() {
         autoItems = emptyList()
+        autoNetwork = null
         if (PositionReader(this).hasPreciseAccess) {
             loadAuto()
             return
@@ -904,33 +912,40 @@ class ConfigureActivity : Activity() {
     private fun loadAuto() {
         save.isEnabled = false
         loadJob = scope.launch {
-            val store = AutoMode.store(this@ConfigureActivity)
-            if (store.savedAt() == null) {
-                showLoading(getString(R.string.auto_loading_index))
-                val error = withContext(Dispatchers.IO) {
-                    try {
-                        store.download()
-                        null
-                    } catch (e: IOException) {
-                        e
-                    }
-                }
-                if (error != null) {
-                    showMessage(getString(R.string.auto_error_index, error.message ?: error.javaClass.simpleName), canRetry = true)
-                    return@launch
-                }
-            }
             showLoading(getString(R.string.auto_loading_position))
             val fix = PositionReader(this@ConfigureActivity).read()
             if (fix == null || (fix.accuracyM ?: 0f) > AnchorPolicy.MAX_ACCURACY_M) {
                 showMessage(getString(R.string.auto_error_position), canRetry = true, R.drawable.ic_location_off)
                 return@launch
             }
-            val ranked = withContext(Dispatchers.IO) { AutoMode.ranking(this@ConfigureActivity, fix.point) }?.list.orEmpty()
-            if (ranked.isEmpty()) {
-                showMessage(getString(R.string.auto_error_no_stop), canRetry = true, R.drawable.ic_search_large)
-                return@launch
+            // Le réseau se déduit de la position, sur le téléphone. Son index d'arrêts est téléchargé
+            // la première fois : celui de l'Île-de-France se construit ici, les autres viennent de Tracéo.
+            val job = coroutineContext[Job]
+            val lookup = withContext(Dispatchers.IO) {
+                AutoMode.lookupEnsuringIndex(this@ConfigureActivity, fix.point) { downloading ->
+                    runOnUiThread {
+                        if (job?.isActive == true && step == Step.AUTO) showLoading(indexLoadingMessage(downloading))
+                    }
+                }
             }
+            val ranked = when (lookup) {
+                is NearbyLookup.Found -> lookup.ranking.list
+                is NearbyLookup.NoIndex -> {
+                    showMessage(getString(R.string.auto_error_index, lookup.network.city), canRetry = true)
+                    return@launch
+                }
+                is NearbyLookup.NoStop -> {
+                    showMessage(getString(R.string.auto_error_no_stop), canRetry = true, R.drawable.ic_search_large)
+                    return@launch
+                }
+                NearbyLookup.NoNetwork -> {
+                    val covered = Sources.catalog(this@ConfigureActivity).read().networks.joinToString(", ") { it.city }
+                    showMessage(getString(R.string.auto_error_no_network, covered), canRetry = true, R.drawable.ic_search_large)
+                    return@launch
+                }
+            }
+            autoNetwork = lookup.network.id
+            bindMention()
             if (isProximity) {
                 // Rien à choisir ici : le widget affiche les lignes proches selon le classement.
                 AutoMode.saveConfiguration(
@@ -961,6 +976,13 @@ class ConfigureActivity : Activity() {
             showAutoRows()
         }
     }
+
+    private fun indexLoadingMessage(downloading: Network): String =
+        if (downloading.isIdfm) {
+            getString(R.string.auto_loading_index)
+        } else {
+            getString(R.string.auto_loading_index_network, downloading.city)
+        }
 
     private fun showAutoRows() {
         adapter.setItems(autoItems)

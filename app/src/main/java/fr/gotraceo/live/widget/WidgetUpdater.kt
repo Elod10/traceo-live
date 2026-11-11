@@ -167,6 +167,9 @@ object WidgetUpdater {
             val alignUntil = if (dueNow && !source.followsTraceo) now + source.refreshMinutes * 60_000L / 2 else now
             // Un widget à reconfigurer ne fait aucun appel, même à la demande : Tracéo répondrait 404.
             config != null && DataSources.route(config, hasKey) != PassageRoute.RECONFIGURE &&
+                // Hors de tout réseau, un widget qui suit la position n'a rien à demander : sa ligne
+                // est celle d'une autre ville, et c'est le prochain toucher qui relira la position.
+                !(config.auto && prefs.auto(id).uncovered) &&
                 (force || (screenOn && due[id]?.let { it <= alignUntil } == true))
         }.toSet()
         ids.filter { it !in targets }.forEach { render(context, it) }

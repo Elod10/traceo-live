@@ -13,13 +13,19 @@ import fr.gotraceo.live.data.DataSources
 import fr.gotraceo.live.data.Directions
 import fr.gotraceo.live.data.GeoPoint
 import fr.gotraceo.live.data.NearbyLine
+import fr.gotraceo.live.data.NearbyLookup
+import fr.gotraceo.live.data.NearbyNetworks
 import fr.gotraceo.live.data.NearbyRanking
 import fr.gotraceo.live.data.NearbyRules
+import fr.gotraceo.live.data.Network
+import fr.gotraceo.live.data.NetworkCatalog
+import fr.gotraceo.live.data.Networks
 import fr.gotraceo.live.data.PassageSource
 import fr.gotraceo.live.data.PositionFix
 import fr.gotraceo.live.data.PositionReader
 import fr.gotraceo.live.data.Prefs
 import fr.gotraceo.live.data.Proximity
+import fr.gotraceo.live.data.ProximityState
 import fr.gotraceo.live.data.StopIndexStore
 import fr.gotraceo.live.data.TransportMode
 import fr.gotraceo.live.data.WidgetConfig
@@ -41,11 +47,16 @@ import java.util.concurrent.ConcurrentHashMap
  * Le dessin et l'actualisation restent ceux des autres widgets, ce qui garde tous les formats compatibles.
  *
  * Un toucher relit la position. Deux touchers rapprochés ouvrent le choix des lignes proches.
+ *
+ * Le réseau se déduit de la position, par l'emprise des réseaux du catalogue, sur le téléphone : la
+ * position ne part vers aucun serveur, et le widget change de réseau tout seul quand on change de ville.
  */
 object AutoMode {
 
     private const val TAG = "TRWidget"
     private const val INDEX_FILE = "stop_index.bin"
+    private const val NETWORK_INDEX_PREFIX = "stop_index_"
+    private const val INDEX_SUFFIX = ".bin"
 
     /** Widgets dont la position est en cours de lecture : la feuille de choix l'attend. */
     private val locating: MutableSet<Int> = ConcurrentHashMap.newKeySet()
@@ -53,21 +64,64 @@ object AutoMode {
     /** Depuis quand l'usager choisit une ligne : une mise à jour plus ancienne ne doit plus rien changer. */
     private val choosingSince = ConcurrentHashMap<Int, Long>()
 
-    fun store(context: Context): StopIndexStore =
-        StopIndexStore(File(context.applicationContext.noBackupFilesDir, INDEX_FILE))
+    /** L'index des arrêts de l'Île-de-France, que le téléphone construit lui-même. */
+    fun store(context: Context): StopIndexStore = store(context, Networks.IDFM)
 
-    /** Classement autour d'un point, sans réseau. Null si l'index n'existe pas encore. */
-    fun ranking(context: Context, point: GeoPoint): NearbyRanking? {
+    /** L'index des arrêts d'un réseau. Celui de l'Île-de-France garde son fichier d'avant les réseaux. */
+    fun store(context: Context, networkId: String): StopIndexStore {
+        val name = if (Networks.isIdfm(networkId)) INDEX_FILE else NETWORK_INDEX_PREFIX + networkId + INDEX_SUFFIX
+        return StopIndexStore(File(context.applicationContext.noBackupFilesDir, name), networkId)
+    }
+
+    /**
+     * Lignes proches d'un point, dans le réseau qui le couvre, sans appel réseau : les index sont
+     * ceux du téléphone.
+     */
+    fun lookup(context: Context, point: GeoPoint): NearbyLookup =
+        lookup(context, point, Sources.catalog(context).read(), onDownload = null)
+
+    /**
+     * Lignes proches d'un point, en téléchargeant au besoin l'index du réseau qui le couvre : c'est le
+     * cas la première fois qu'on arrive dans une ville. Si rien n'est trouvé avec un catalogue ancien,
+     * il est redemandé à Tracéo : un réseau a pu s'y ajouter.
+     *
+     * @param onDownload appelé avant le téléchargement d'un index, pour le dire à l'écran
+     */
+    fun lookupEnsuringIndex(context: Context, point: GeoPoint, onDownload: (Network) -> Unit = {}): NearbyLookup {
+        val catalogs = Sources.catalog(context)
+        val catalog = catalogs.read()
+        val known = lookup(context, point, catalog, onDownload)
+        if (known is NearbyLookup.Found || !catalogs.isStale(System.currentTimeMillis())) return known
+        val fresh = catalogs.fresh()
+        // Sans réponse de Tracéo, le catalogue est le même : chercher à nouveau ne donnerait rien de plus.
+        return if (fresh.savedAt == catalog.savedAt) known else lookup(context, point, fresh, onDownload)
+    }
+
+    /** @param onDownload null pour ne rien télécharger ; sinon, l'index manquant d'un réseau est téléchargé avant d'être lu */
+    private fun lookup(context: Context, point: GeoPoint, catalog: NetworkCatalog, onDownload: ((Network) -> Unit)?): NearbyLookup {
         val prefs = Prefs(context)
-        val area = store(context).around(point.lat, point.lon, NearbyRules.READ_RADIUS_M) ?: return null
         val paris = Calendar.getInstance(TimeZone.getTimeZone("Europe/Paris"))
-        return NearbyRules.rank(
-            candidates = NearbyRules.linesAround(area, point),
+        return NearbyNetworks.lookup(
+            catalog = catalog,
+            point = point,
             favorites = prefs.favoriteLines,
             pickedLineKey = prefs.placeChoices.lineAt(point),
             nightService = NearbyRules.isNightService(paris.get(Calendar.HOUR_OF_DAY), paris.get(Calendar.MINUTE)),
-            modes = DataSources.modes(prefs.hasApiKey).flatMap { it.apiModes }.toSet(),
-        )
+            idfmModes = DataSources.modes(prefs.hasApiKey).flatMap { it.apiModes }.toSet(),
+        ) { network ->
+            // Les réseaux sont essayés du plus local au plus étendu : un index n'est téléchargé que
+            // si aucun réseau plus local n'a déjà donné de lignes.
+            val store = store(context, network.id)
+            if (onDownload != null && store.savedAt() == null) {
+                onDownload(network)
+                try {
+                    store.download(indexAt = network.indexAt)
+                } catch (e: IOException) {
+                    Log.w(TAG, "Index des arrêts indisponible pour ${network.id}", e)
+                }
+            }
+            store.around(point.lat, point.lon, NearbyRules.READ_RADIUS_M)
+        }
     }
 
     fun configFor(widgetId: Int, nearby: NearbyLine, theme: WidgetTheme): WidgetConfig {
@@ -195,7 +249,9 @@ object AutoMode {
         endLocating(widgetId)
         if (tookOver(widgetId, tappedAt)) return
 
-        val ranking = withContext(Dispatchers.IO) { point?.let { rankingEnsuringIndex(app, it) } }
+        // Le réseau est celui de l'endroit : dans une autre ville, les lignes viennent d'un autre réseau.
+        val lookup = withContext(Dispatchers.IO) { point?.let { lookupEnsuringIndex(app, it) } }
+        val ranking = lookup?.rankingOrNull
         var message = when (decision) {
             AnchorDecision.NO_FIX -> AutoMessage.NO_POSITION
             AnchorDecision.IMPRECISE -> AutoMessage.IMPRECISE
@@ -203,31 +259,45 @@ object AutoMode {
         }
         val proximity = WidgetProviders.isProximity(app, widgetId)
         var anchor = before.anchor
-        var shownLineId = config.line.id
+        var shownLineKey = config.line.key
         var applied = false
+        // Seule une position fiable dit si l'on est sorti des réseaux, ou revenu là où l'arrêt a été choisi.
+        val uncovered = when (decision) {
+            AnchorDecision.MOVED -> lookup?.leavesWidgetWithoutNetwork(config.networkId) ?: before.uncovered
+            AnchorDecision.SAME_PLACE -> false
+            else -> before.uncovered
+        }
         if (decision == AnchorDecision.MOVED && point != null && proximity) {
             // L'actualisation qui suit classe les lignes autour de cette nouvelle position.
-            if (ranking?.list.isNullOrEmpty()) {
-                message = AutoMessage.NO_STOP
+            val first = ranking?.list?.firstOrNull()
+            if (first == null) {
+                message = noLineMessage(lookup)
             } else {
                 anchor = point
+                // Autre ville, autre réseau : la configuration le suit, pour sa source, sa cadence et ses mentions.
+                if (first.nearby.line.networkId != config.networkId) {
+                    WidgetUpdater.exclusive { prefs.saveConfig(configFor(widgetId, first.nearby, config.theme)) }
+                }
                 prefs.saveAuto(widgetId, prefs.auto(widgetId).copy(anchor = point))
             }
         } else if (decision == AnchorDecision.MOVED && point != null) {
             val best = pickBest(prefs, config, ranking)
             if (tookOver(widgetId, tappedAt)) return
             if (best == null) {
-                message = AutoMessage.NO_STOP
+                message = noLineMessage(lookup)
             } else {
                 WidgetUpdater.exclusive {
                     prefs.saveConfig(best.config)
                     prefs.saveState(widgetId, best.state)
                 }
                 anchor = point
-                shownLineId = best.nearby.line.id
+                shownLineKey = best.nearby.line.key
                 applied = true
             }
         }
+        // Avant l'actualisation : hors réseau, elle ne demande rien et le widget le dit.
+        if (uncovered != before.uncovered) prefs.saveAuto(widgetId, prefs.auto(widgetId).copy(uncovered = uncovered))
+        if (uncovered) noteAttempt(prefs, widgetId, proximity)
         if (!applied) WidgetUpdater.refresh(app, intArrayOf(widgetId), force = true)
         if (tookOver(widgetId, tappedAt)) return
 
@@ -238,14 +308,14 @@ object AutoMode {
             val shown = prefs.proximity(widgetId)?.let { Proximity.visible(it.entries, now, proximityRows(app, widgetId)).size } ?: 0
             maxOf(0, lines.size - shown)
         } else {
-            lines.count { it.nearby.line.id != shownLineId }
+            lines.count { it.nearby.line.key != shownLineKey }
         }
         prefs.saveAuto(
             widgetId,
             latest.copy(
                 anchor = anchor,
                 last = point,
-                distanceM = lines.firstOrNull { it.nearby.line.id == shownLineId }?.nearby?.distanceM ?: latest.distanceM,
+                distanceM = lines.firstOrNull { it.nearby.line.key == shownLineKey }?.nearby?.distanceM ?: latest.distanceM,
                 hintUntil = if (quiet) latest.hintUntil else now + AutoState.HINT_MS,
                 others = if (quiet) latest.others else others,
                 message = if (quiet) latest.message else message,
@@ -263,7 +333,7 @@ object AutoMode {
         val prefs = Prefs(app)
         val auto = prefs.auto(widgetId)
         val point = auto.anchor ?: auto.last
-        val ranked = withContext(Dispatchers.IO) { point?.let { rankingEnsuringIndex(app, it) } }?.list.orEmpty()
+        val ranked = withContext(Dispatchers.IO) { point?.let { lookupEnsuringIndex(app, it) } }?.rankingOrNull?.list.orEmpty()
         val source = Sources.proximity(app)
         val state = Proximity.collect(
             ranked = ranked,
@@ -292,18 +362,24 @@ object AutoMode {
         return listOf(sizes.portrait, sizes.landscape).maxOf { ProximityLayout.rows(it.width, it.height) }
     }
 
-    private fun rankingEnsuringIndex(context: Context, point: GeoPoint): NearbyRanking? {
-        val store = store(context)
-        if (store.savedAt() == null) {
-            try {
-                store.download()
-            } catch (e: IOException) {
-                Log.w(TAG, "Index des arrêts indisponible", e)
-                return null
-            }
+    /**
+     * Hors réseau, rien n'est demandé à la source : cette lecture de la position tient lieu de
+     * tentative, pour qu'un widget suivi garde son rythme au lieu de relire la position à chaque minute.
+     */
+    private fun noteAttempt(prefs: Prefs, widgetId: Int, proximity: Boolean) {
+        val now = System.currentTimeMillis()
+        if (proximity) {
+            val state = prefs.proximity(widgetId) ?: ProximityState(0L, now, emptyList())
+            prefs.saveProximity(widgetId, state.copy(attemptedAt = now))
+        } else {
+            val state = prefs.state(widgetId) ?: WidgetState(0L, now, emptyList(), null)
+            prefs.saveState(widgetId, state.copy(attemptedAt = now))
         }
-        return ranking(context, point)
     }
+
+    /** Pourquoi la position n'a donné aucune ligne : aucun réseau ne couvre l'endroit, ou aucun arrêt n'est à portée. */
+    private fun noLineMessage(lookup: NearbyLookup?): AutoMessage =
+        if (lookup is NearbyLookup.NoNetwork) AutoMessage.NO_NETWORK else AutoMessage.NO_STOP
 
     private class Picked(val nearby: NearbyLine, val config: WidgetConfig, val state: WidgetState)
 
@@ -347,9 +423,16 @@ object AutoMode {
         if (WidgetProviders.isProximity(app, widgetId)) {
             // La ligne choisie passe en tête : le classement suffit à la placer.
             val current = prefs.auto(widgetId)
+            // Choisie dans une autre ville, elle emmène le widget dans son réseau.
+            if (nearby.line.networkId != config.networkId) {
+                WidgetUpdater.exclusive { prefs.saveConfig(configFor(widgetId, nearby, config.theme)) }
+            }
             prefs.saveAuto(
                 widgetId,
-                current.copy(anchor = current.last ?: current.anchor, choiceUntil = 0L, hintUntil = 0L, others = 0, message = null),
+                current.copy(
+                    anchor = current.last ?: current.anchor, choiceUntil = 0L, hintUntil = 0L, others = 0, message = null,
+                    uncovered = false,
+                ),
             )
             WidgetUpdater.refresh(app, intArrayOf(widgetId), force = true)
             return
@@ -372,6 +455,7 @@ object AutoMode {
                 hintUntil = 0L,
                 others = 0,
                 message = null,
+                uncovered = false,
             ),
         )
         WidgetUpdater.render(app, widgetId)
@@ -384,17 +468,29 @@ object AutoMode {
         WidgetUpdater.render(context, widgetId)
     }
 
-    /** Met l'index à jour s'il est ancien : chaque semaine en Wi-Fi, chaque mois sur le réseau mobile. */
+    /**
+     * Met à jour les index déjà sur le téléphone. Celui de l'Île-de-France, s'il est ancien : chaque
+     * semaine en Wi-Fi, chaque mois sur le réseau mobile. Celui d'un autre réseau, quand le catalogue
+     * annonce de nouveaux horaires.
+     */
     fun refreshIndexIfStale(context: Context) {
         val app = context.applicationContext
-        val store = store(app)
+        val idfm = store(app)
         val metered = app.getSystemService(ConnectivityManager::class.java)?.isActiveNetworkMetered ?: true
-        if (store.savedAt() == null || !store.isStale(System.currentTimeMillis(), unmetered = !metered)) return
+        if (idfm.savedAt() != null && idfm.isStale(System.currentTimeMillis(), unmetered = !metered)) refreshIndex(idfm, Networks.ILE_DE_FRANCE)
+        Sources.catalog(app).read().others.forEach { network ->
+            val store = store(app, network.id)
+            if (store.savedAt() != null && store.isOutdated(network.indexAt)) refreshIndex(store, network)
+        }
+    }
+
+    private fun refreshIndex(store: StopIndexStore, network: Network) {
+        val networkId = network.id
         try {
-            val stats = store.download()
-            Log.i(TAG, "Index des arrêts à jour : ${stats.stops} arrêts, ${stats.lines} lignes")
+            val stats = store.download(indexAt = network.indexAt)
+            Log.i(TAG, "Index des arrêts à jour ($networkId) : ${stats.stops} arrêts, ${stats.lines} lignes")
         } catch (e: IOException) {
-            Log.w(TAG, "Mise à jour de l'index impossible : l'ancien reste en place", e)
+            Log.w(TAG, "Mise à jour de l'index impossible ($networkId) : l'ancien reste en place", e)
         }
     }
 

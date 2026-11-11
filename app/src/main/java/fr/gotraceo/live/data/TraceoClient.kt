@@ -93,6 +93,39 @@ class TraceoClient(
     }
 
     /**
+     * Index des arrêts d'un réseau hors Île-de-France, pour chercher les arrêts proches sur le
+     * téléphone. Demander l'index d'un réseau dit seulement à Tracéo qu'on s'y intéresse : la
+     * position n'est pas envoyée.
+     */
+    @Throws(TraceoException::class)
+    fun index(networkId: String): NetworkIndex {
+        val root = get(networkUrl(networkId) + "/index", LIST_READ_TIMEOUT_MS, "Index des arrêts introuvable chez Tracéo.")
+        val linesJson = root.optJSONArray("lines") ?: throw invalidResponse()
+        val stopsJson = root.optJSONArray("stops") ?: throw invalidResponse()
+        // Les arrêts désignent leurs lignes par leur position : une ligne illisible garde donc sa place.
+        val lines = (0 until linesJson.length()).map { i -> linesJson.optJSONObject(i)?.let { parseNetworkLine(it, networkId) } }
+        var skipped = 0
+        val stops = (0 until stopsJson.length()).mapNotNull { i ->
+            val stop = stopsJson.optJSONObject(i)?.let { parseIndexedStop(it, lines) }
+            if (stop == null) skipped++
+            stop
+        }
+        return NetworkIndex(SiriParser.parseTime(root.optStringOrNull("builtAt")), lines.filterNotNull(), stops, skipped)
+    }
+
+    private fun parseIndexedStop(o: JSONObject, lines: List<Line?>): IndexedStop? {
+        val zone = o.optStringOrNull("zone") ?: return null
+        val name = o.optStringOrNull("name") ?: return null
+        val lat = o.optDouble("lat")
+        val lon = o.optDouble("lon")
+        if (lat.isNaN() || lon.isNaN()) return null
+        val served = o.optJSONArray("lines") ?: return null
+        val lineIds = (0 until served.length()).mapNotNull { i -> lines.getOrNull(served.optInt(i, -1))?.id }.distinct()
+        if (lineIds.isEmpty()) return null
+        return IndexedStop(name = name, town = o.optStringOrNull("town"), lat = lat, lon = lon, zone = zone, lineIds = lineIds)
+    }
+
+    /**
      * Prochains passages d'une ligne à une zone d'arrêt, en Île-de-France.
      *
      * Un 503 peut venir d'arrêts absents du cache de Tracéo : les demander une fois par ligne et par

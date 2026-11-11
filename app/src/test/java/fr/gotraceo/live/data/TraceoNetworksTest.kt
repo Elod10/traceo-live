@@ -25,6 +25,22 @@ class TraceoNetworksTest {
         const val LINES_PATH = "/api/reseaux/tcat/lines"
         const val STATIONS_PATH = "/api/reseaux/tcat/stations"
         const val PASSAGES_PATH = "/api/reseaux/tcat/passages"
+        const val INDEX_PATH = "/api/reseaux/tcat/index"
+
+        /** Un quai par entrée ; la ligne sans identifiant et les deux derniers arrêts sont inutilisables. */
+        const val INDEX = """{"version": 1, "builtAt": "2026-11-11T03:10:00Z",
+            "lines": [
+                {"id": "2B", "code": "2B", "name": "Bréviandes - Voves", "color": "#F29400",
+                 "textColor": "#FFFFFF", "mode": {"key": "bus", "label": "Bus"}},
+                {"code": "sans identifiant"},
+                {"id": "1", "code": "1", "name": "Chartreux - Pont-Sainte-Marie", "color": "#E2001A",
+                 "textColor": "#FFFFFF", "mode": {"key": "bus", "label": "Bus"}}],
+            "stops": [
+                {"zone": "1:ACACI", "name": "Acacias", "town": null, "lat": 48.29731, "lon": 4.07412, "lines": [0, 2]},
+                {"zone": "1:ACACI", "name": "Acacias", "town": null, "lat": 48.29750, "lon": 4.07430, "lines": [0]},
+                {"zone": "1:HALLE", "name": "Halle", "town": "Troyes", "lat": 48.29900, "lon": 4.07600, "lines": [2, 1, 9]},
+                {"zone": "1:PERDU", "name": "Sans coordonnées", "lines": [0]},
+                {"zone": "1:VIDE", "name": "Sans ligne connue", "lat": 48.3, "lon": 4.07, "lines": [1]}]}"""
 
         const val CATALOG = """{"version": 1, "networks": [{
             "id": "tcat", "name": "TCAT", "city": "Troyes",
@@ -310,6 +326,90 @@ class TraceoNetworksTest {
         server.respond("/api/widget/passages", 200, """{"passages": [], "fetchedAt": null, "fresh": false}""")
         client().departures("stop_area:IDFM:71673", "C01371", Networks.IDFM)
         assertEquals("/api/widget/passages?line=line%3AIDFM%3AC01371&stop=stop_area%3AIDFM%3A71673", server.requests.single().target)
+    }
+
+    // --- Index des arrêts ----------------------------------------------------------------------
+
+    @Test
+    fun theIndexListsEachPlatformWithItsLines() {
+        server.respond(INDEX_PATH, 200, INDEX)
+        val index = client().index(TCAT)
+
+        assertEquals("/api/reseaux/tcat/index", server.requests.single().target)
+        assertEquals(SiriParser.parseTime("2026-11-11T03:10:00Z"), index.builtAt)
+        assertEquals(listOf("2B", "1"), index.lines.map { it.id })
+        assertTrue(index.lines.all { it.networkId == TCAT })
+
+        assertEquals(
+            listOf(
+                IndexedStop("Acacias", null, 48.29731, 4.07412, "1:ACACI", listOf("2B", "1")),
+                IndexedStop("Acacias", null, 48.29750, 4.07430, "1:ACACI", listOf("2B")),
+                // La ligne illisible garde sa place : la position 2 désigne toujours la ligne « 1 ».
+                IndexedStop("Halle", "Troyes", 48.29900, 4.07600, "1:HALLE", listOf("1")),
+            ),
+            index.stops,
+        )
+        assertEquals("Arrêt sans coordonnées, arrêt sans ligne connue", 2, index.skipped)
+    }
+
+    /** L'index d'un réseau prend sur le téléphone la forme de celui de l'Île-de-France, et se lit sans réseau. */
+    @Test
+    fun theIndexOfANetworkIsKeptOnThePhoneAndSearchedThere() {
+        server.respond(INDEX_PATH, 200, INDEX)
+        val file = storeFile()
+        val store = StopIndexStore(file, TCAT) { client().index(it) }
+        assertNull(store.savedAt())
+        assertTrue(store.isOutdated(null))
+
+        val stats = store.download(now = 99L)
+        assertEquals(StopIndexBuilder.Stats(stops = 3, lines = 2, skippedRows = 2), stats)
+        // Daté de ses horaires, pas du téléchargement : c'est ce que le catalogue permet de comparer.
+        val builtAt = SiriParser.parseTime("2026-11-11T03:10:00Z")!!
+        assertEquals(builtAt, store.savedAt())
+        assertFalse(store.isOutdated(builtAt))
+        assertFalse(store.isOutdated(null))
+        assertTrue(store.isOutdated(builtAt + 1))
+
+        // Le catalogue annonce des horaires un peu plus récents que la date portée par l'index : une
+        // fois rechargé, il n'est plus à recharger, même si Tracéo sert encore la même date.
+        server.respond(INDEX_PATH, 200, INDEX)
+        store.download(now = 99L, indexAt = builtAt + 60_000L)
+        assertFalse(store.isOutdated(builtAt + 60_000L))
+
+        server.close()
+        val area = StopIndexStore(file, TCAT) { throw IOException("hors ligne") }.around(48.2973, 4.0741, 500)!!
+        assertEquals(3, area.stops.size)
+        assertTrue(area.lines.values.all { it.networkId == TCAT })
+        val nearest = NearbyRules.linesAround(area, GeoPoint(48.2973, 4.0741)).first { it.line.id == "2B" }
+        assertEquals("1:ACACI", nearest.stopId)
+        assertEquals("F29400", nearest.line.color)
+    }
+
+    @Test
+    fun aFailedIndexDownloadKeepsThePreviousOne() {
+        server.respond(INDEX_PATH, 200, INDEX)
+        server.respond(INDEX_PATH, 503, """{"error": "Indisponible."}""")
+        val store = StopIndexStore(storeFile(), TCAT) { client().index(it) }
+        store.download()
+        try {
+            store.download()
+            fail("IOException attendue")
+        } catch (e: IOException) {
+            assertTrue(e is TraceoException)
+        }
+        assertEquals(3, store.around(48.2973, 4.0741, 500)!!.stops.size)
+    }
+
+    @Test
+    fun anEmptyIndexIsRefused() {
+        server.respond(INDEX_PATH, 200, """{"version": 1, "builtAt": null, "lines": [], "stops": []}""")
+        val store = StopIndexStore(storeFile(), TCAT) { client().index(it) }
+        try {
+            store.download()
+            fail("IOException attendue")
+        } catch (e: IOException) {
+            assertNull(store.savedAt())
+        }
     }
 
     // --- Erreurs -------------------------------------------------------------------------------

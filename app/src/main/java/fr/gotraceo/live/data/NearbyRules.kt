@@ -70,8 +70,13 @@ object NearbyRules {
 
     private val NIGHT_CODE = Regex("^N\\d+$")
 
+    /**
+     * Vrai pour une ligne du Noctilien, qui ne roule que la nuit. La règle est francilienne : ailleurs,
+     * une ligne « N1 » peut rouler en plein jour.
+     */
     fun isNightLine(line: Line): Boolean =
-        NIGHT_CODE.matches(line.shortName.trim()) || line.network?.contains("Noctilien", ignoreCase = true) == true
+        Networks.isIdfm(line.networkId) &&
+            (NIGHT_CODE.matches(line.shortName.trim()) || line.network?.contains("Noctilien", ignoreCase = true) == true)
 
     /** Vrai pendant le service de nuit, de 0 h 30 à 5 h 30. */
     fun isNightService(hour: Int, minute: Int): Boolean {
@@ -152,6 +157,78 @@ object NearbyRules {
             if (isActive(result)) return candidate to result
         }
         return first to firstResult
+    }
+}
+
+/** Ce que donne une position à un widget qui la suit. */
+sealed class NearbyLookup {
+
+    /** Les lignes proches, classées, dans le réseau qui dessert l'endroit. */
+    class Found(val network: Network, val ranking: NearbyRanking) : NearbyLookup()
+
+    /** Un réseau couvre l'endroit, mais aucun de ses arrêts n'est à portée. */
+    class NoStop(val network: Network) : NearbyLookup()
+
+    /** L'index des arrêts de ce réseau n'est pas sur le téléphone, et n'a pas pu être téléchargé. */
+    class NoIndex(val network: Network) : NearbyLookup()
+
+    /** Aucun réseau connu ne couvre l'endroit. */
+    object NoNetwork : NearbyLookup()
+
+    val rankingOrNull: NearbyRanking? get() = (this as? Found)?.ranking
+
+    /**
+     * Vrai si le widget n'a rien à montrer ici, et ne doit pas rester sur les passages d'une autre
+     * ville : aucun réseau ne couvre l'endroit, ou un autre réseau que le sien le couvre sans arrêt à
+     * portée. Dans son propre réseau, il garde son arrêt, comme avant l'arrivée des autres.
+     */
+    fun leavesWidgetWithoutNetwork(widgetNetworkId: String): Boolean = when (this) {
+        is NoNetwork -> true
+        is NoStop -> network.id != widgetNetworkId
+        else -> false
+    }
+}
+
+/** Le réseau se déduit de la position, sur le téléphone : un widget qui la suit change de ville sans réglage. */
+object NearbyNetworks {
+
+    /**
+     * Cherche les lignes proches dans les réseaux qui couvrent le point, du plus local au plus étendu,
+     * et s'arrête au premier qui en a.
+     *
+     * @param favorites clés des lignes favorites (cf. [Line.key])
+     * @param idfmModes modes acceptés par la source des passages en Île-de-France ; un autre réseau
+     *        sert tous les siens
+     * @param area arrêts d'un réseau autour du point, ou null si son index est indisponible
+     */
+    fun lookup(
+        catalog: NetworkCatalog,
+        point: GeoPoint,
+        favorites: Set<String>,
+        pickedLineKey: String?,
+        nightService: Boolean,
+        idfmModes: Set<String>,
+        area: (Network) -> StopIndexArea?,
+    ): NearbyLookup {
+        val covering = catalog.covering(point)
+        var withoutIndex: Network? = null
+        var withoutStop: Network? = null
+        for (network in covering) {
+            val stops = area(network)
+            if (stops == null) {
+                withoutIndex = withoutIndex ?: network
+            } else {
+                val candidates = NearbyRules.linesAround(stops, point)
+                val modes = if (network.isIdfm) idfmModes else candidates.mapTo(HashSet()) { it.line.mode }
+                val ranking = NearbyRules.rank(candidates, favorites, pickedLineKey, nightService, modes)
+                if (ranking.list.isNotEmpty()) return NearbyLookup.Found(network, ranking)
+                withoutStop = withoutStop ?: network
+            }
+        }
+        // Un index manquant passe devant : il reste une chance de trouver des arrêts en le téléchargeant.
+        return withoutIndex?.let { NearbyLookup.NoIndex(it) }
+            ?: withoutStop?.let { NearbyLookup.NoStop(it) }
+            ?: NearbyLookup.NoNetwork
     }
 }
 
@@ -259,6 +336,11 @@ data class AutoState(
     val others: Int = 0,
     /** Motif à signaler sur le widget pendant ce message. */
     val message: AutoMessage? = null,
+    /**
+     * Vrai tant que la dernière position fiable est hors de tout réseau : le widget le dit à la place
+     * de ses passages, et ne les redemande pas, jusqu'à ce qu'une position retrouve des arrêts.
+     */
+    val uncovered: Boolean = false,
 ) {
     fun isChoiceOpen(now: Long): Boolean = now < choiceUntil
 
@@ -279,6 +361,7 @@ data class AutoState(
         .put("hintUntil", hintUntil)
         .put("others", others)
         .putOpt("message", message?.name)
+        .putOpt("uncovered", if (uncovered) true else null)
 
     companion object {
         /** Deux touchers plus rapprochés que ce délai ouvrent le choix des lignes. */
@@ -295,6 +378,7 @@ data class AutoState(
             hintUntil = o.optLong("hintUntil"),
             others = o.optInt("others"),
             message = AutoMessage.entries.firstOrNull { it.name == o.optStringOrNull("message") },
+            uncovered = o.optBoolean("uncovered", false),
         )
 
         private fun point(o: JSONObject, lat: String, lon: String): GeoPoint? =
@@ -309,6 +393,7 @@ enum class AutoMessage(val label: String, val short: String) {
     NO_POSITION("GPS indisponible", "GPS ?"),
     IMPRECISE("GPS imprécis", "GPS ?"),
     NO_STOP("Aucun arrêt", "Aucun"),
+    NO_NETWORK("Aucun réseau ici", "Aucun"),
     NEEDS_ACCESS("Position à autoriser", "GPS ?"),
 }
 
