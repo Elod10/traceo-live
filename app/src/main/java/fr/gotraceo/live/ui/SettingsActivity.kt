@@ -9,8 +9,10 @@ import android.widget.RadioGroup
 import android.widget.TextView
 import fr.gotraceo.live.R
 import fr.gotraceo.live.data.DataSources
+import fr.gotraceo.live.data.Networks
 import fr.gotraceo.live.data.Prefs
 import fr.gotraceo.live.widget.QuotaAlerts
+import fr.gotraceo.live.widget.Sources
 import fr.gotraceo.live.widget.WidgetUpdater
 
 /** Réglages : source des données, clé API, fréquence d'actualisation, sources et confidentialité. */
@@ -57,16 +59,40 @@ class SettingsActivity : Activity() {
         } else {
             getString(R.string.settings_key_add_sub)
         }
-        findViewById<TextView>(R.id.refresh_help).setText(if (hasKey) R.string.main_refresh_help_key else R.string.main_refresh_help)
-        renderRefreshChoices(hasKey)
+        val fastest = fastestSourceMinutes(hasKey)
+        findViewById<TextView>(R.id.refresh_help).setText(
+            when {
+                hasKey -> R.string.main_refresh_help_key
+                // Un réseau relevé chaque minute permet « Chaque minute », que l'Île-de-France sans clé ne suit pas.
+                fastest < DataSources.TRACEO_MIN_REFRESH_MINUTES -> R.string.main_refresh_help_networks
+                else -> R.string.main_refresh_help
+            },
+        )
+        renderRefreshChoices(fastest)
     }
 
-    private fun renderRefreshChoices(hasKey: Boolean) {
+    /**
+     * Cadence, en minutes, de la source la plus rapide parmi celles des widgets posés : elle borne
+     * les intervalles proposés. L'Île-de-France est relevée toutes les 2 minutes sans clé, et suit
+     * la minute avec une clé ; un autre réseau a la cadence que lui donne le catalogue.
+     */
+    private fun fastestSourceMinutes(hasKey: Boolean): Int {
+        val idfm = if (hasKey) 1 else DataSources.TRACEO_MIN_REFRESH_MINUTES
+        val catalog = Sources.catalog(this).read()
+        val others = WidgetUpdater.widgetIds(this).asList()
+            .mapNotNull { prefs.config(it)?.networkId }
+            .filter { !Networks.isIdfm(it) }
+            .distinct()
+            .map { catalog.byId(it)?.sourceMinutes ?: DataSources.TRACEO_MIN_REFRESH_MINUTES }
+        return (others + idfm).min()
+    }
+
+    private fun renderRefreshChoices(sourceMinutes: Int) {
         val group = findViewById<RadioGroup>(R.id.refresh_choices)
         group.setOnCheckedChangeListener(null)
         group.removeAllViews()
-        val choices = DataSources.refreshChoices(Prefs.REFRESH_CHOICES, hasKey)
-        val current = DataSources.refreshMinutes(prefs.refreshMinutes, hasKey).takeIf { it in choices }
+        val choices = DataSources.refreshChoices(Prefs.REFRESH_CHOICES, sourceMinutes)
+        val current = DataSources.refreshMinutes(prefs.refreshMinutes, sourceMinutes).takeIf { it in choices }
             ?: Prefs.DEFAULT_REFRESH_MINUTES
         choices.forEach { minutes ->
             val button = layoutInflater.inflate(R.layout.item_refresh_choice, group, false) as RadioButton
@@ -83,7 +109,7 @@ class SettingsActivity : Activity() {
         group.setOnCheckedChangeListener { radio, checkedId ->
             val minutes = radio.findViewById<View>(checkedId)?.tag as? Int ?: return@setOnCheckedChangeListener
             // Comparer à l'intervalle appliqué conserve « Chaque minute » pour le retour d'une clé.
-            if (minutes != DataSources.refreshMinutes(prefs.refreshMinutes, hasKey)) {
+            if (minutes != DataSources.refreshMinutes(prefs.refreshMinutes, sourceMinutes)) {
                 prefs.refreshMinutes = minutes
                 WidgetUpdater.scheduleTick(this)
             }

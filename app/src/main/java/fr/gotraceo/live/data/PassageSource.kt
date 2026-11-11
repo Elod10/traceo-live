@@ -169,9 +169,24 @@ object DataSources {
     fun refreshChoices(all: List<Int>, hasKey: Boolean): List<Int> =
         all.filter { refreshMinutes(it, hasKey) == it }
 
-    /** Modes proposés à la configuration : le câble et le funiculaire n'existent pas chez Tracéo. */
+    /** Modes proposés en Île-de-France : le câble et le funiculaire n'existent pas chez Tracéo. */
     fun modes(hasKey: Boolean): List<TransportMode> =
-        TransportMode.entries.filter { hasKey || it != TransportMode.OTHER }
+        TransportMode.IDFM.filter { hasKey || it != TransportMode.OTHER }
+
+    /**
+     * Modes proposés pour un réseau : hors Île-de-France, ceux que le catalogue lui connaît. Le RER et
+     * le Transilien restent franciliens : ailleurs, une ligne ferrée est un train.
+     */
+    fun modes(network: Network, hasKey: Boolean): List<TransportMode> =
+        if (network.isIdfm) {
+            modes(hasKey)
+        } else {
+            TransportMode.entries.filter { mode -> mode != TransportMode.RER && mode.apiModes.any { it in network.modes } }
+        }
+
+    /** Intervalles à proposer quand la source la plus rapide des widgets posés est relevée toutes les [sourceMinutes]. */
+    fun refreshChoices(all: List<Int>, sourceMinutes: Int): List<Int> =
+        all.filter { refreshMinutes(it, sourceMinutes) == it }
 
     /** Tracéo sert toutes ses lignes d'un coup : un seul fichier, filtré ensuite par mode. */
     fun linesCacheName(mode: TransportMode, hasKey: Boolean): String =

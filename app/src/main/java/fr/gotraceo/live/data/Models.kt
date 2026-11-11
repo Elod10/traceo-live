@@ -7,7 +7,8 @@ import java.util.Locale
 
 /**
  * Modes de transport proposés dans le menu de configuration.
- * [apiModes] correspond au champ `transportmode` du référentiel des lignes IDFM.
+ * [apiModes] correspond au champ `transportmode` du référentiel des lignes IDFM, dont les autres
+ * réseaux reprennent le vocabulaire (cf. [Networks.appMode]).
  */
 enum class TransportMode(val label: String, val apiModes: List<String>) {
     METRO("Métro", listOf("metro")),
@@ -15,7 +16,18 @@ enum class TransportMode(val label: String, val apiModes: List<String>) {
     TRAIN("Train / Transilien", listOf("rail")),
     TRAM("Tramway", listOf("tram")),
     BUS("Bus / Noctilien", listOf("bus")),
-    OTHER("Câble / Funiculaire", listOf("cableway", "funicular"));
+    OTHER("Câble / Funiculaire", listOf("cableway", "funicular")),
+
+    /** Navettes fluviales ou maritimes : le référentiel d'Île-de-France n'en a pas. */
+    BOAT("Bateau", listOf("boat"));
+
+    /** Libellé du mode dans un réseau : le Transilien et le Noctilien n'existent qu'en Île-de-France. */
+    fun labelIn(networkId: String): String = when {
+        Networks.isIdfm(networkId) -> label
+        this == TRAIN -> "Train"
+        this == BUS -> "Bus"
+        else -> label
+    }
 
     /** Pour les lignes ferrées, on sépare le RER du reste (Transilien, TER...). */
     fun accepts(line: Line): Boolean = when (this) {
@@ -28,6 +40,9 @@ enum class TransportMode(val label: String, val apiModes: List<String>) {
     fun includes(line: Line): Boolean = line.mode in apiModes && accepts(line)
 
     companion object {
+        /** Les modes de l'Île-de-France, dans l'ordre du menu. */
+        val IDFM: List<TransportMode> = listOf(METRO, RER, TRAIN, TRAM, BUS, OTHER)
+
         fun fromName(name: String?): TransportMode? = entries.firstOrNull { it.name == name }
     }
 }

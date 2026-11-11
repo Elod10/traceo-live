@@ -14,6 +14,15 @@ import kotlin.math.max
 /** Emprise d'un réseau : le rectangle qui contient ses arrêts, avec une marge. */
 data class BoundingBox(val latMin: Double, val latMax: Double, val lonMin: Double, val lonMax: Double) {
 
+    operator fun contains(point: GeoPoint): Boolean = point.lat in latMin..latMax && point.lon in lonMin..lonMax
+
+    /** Distance du point à l'emprise, en mètres : nulle à l'intérieur. */
+    fun distanceTo(point: GeoPoint): Int =
+        point.distanceTo(GeoPoint(point.lat.coerceIn(latMin, latMax), point.lon.coerceIn(lonMin, lonMax)))
+
+    /** Étendue en degrés carrés : elle ne sert qu'à comparer deux emprises. */
+    val extent: Double get() = (latMax - latMin) * (lonMax - lonMin)
+
     fun toJson(): JSONObject = JSONObject()
         .put("latMin", latMin)
         .put("latMax", latMax)
@@ -163,11 +172,24 @@ object Networks {
      * L'Île-de-France ne figure pas au catalogue : l'application la connaît d'office. Son emprise est
      * large, car ses lignes sortent de la région (Montargis, Dreux, Château-Thierry, Creil, Gisors).
      */
+    /**
+     * Un réseau dont le téléphone ne connaît que l'identifiant : celui d'un widget dont le réseau a
+     * quitté le catalogue, ou dont le catalogue s'est perdu. Sans emprise, il n'est proposé nulle part.
+     */
+    fun placeholder(networkId: String, mode: String): Network = Network(
+        id = networkId,
+        name = networkId,
+        city = networkId,
+        bbox = BoundingBox(0.0, 0.0, 0.0, 0.0),
+        modes = listOf(mode),
+        refreshSec = Network.DEFAULT_REFRESH_SEC,
+    )
+
     val ILE_DE_FRANCE = Network(
         id = IDFM,
         name = "Île-de-France Mobilités",
         city = "Île-de-France",
-        bbox = BoundingBox(latMin = 47.9, latMax = 49.5, lonMin = 1.1, lonMax = 3.7),
+        bbox = BoundingBox(latMin = 47.95, latMax = 49.35, lonMin = 1.3, lonMax = 3.6),
         modes = listOf("metro", "rail", "tram", "bus", "cableway", "funicular"),
         refreshSec = DataSources.TRACEO_MIN_REFRESH_MINUTES * 60,
     )
@@ -183,11 +205,31 @@ class NetworkCatalog(others: List<Network> = emptyList(), val savedAt: Long = 0L
 
     fun byId(networkId: String): Network? = networks.firstOrNull { it.id == networkId }
 
+    /**
+     * Le réseau à proposer à quelqu'un qui se trouve là : celui dont l'emprise contient le point, ou
+     * à défaut le plus proche à moins de [withinM]. Une position approximative suffit : il s'agit de
+     * reconnaître une ville. Entre deux emprises qui se recouvrent, la plus petite, donc la plus locale.
+     * Un réseau coupé n'est pas proposé.
+     */
+    fun nearest(point: GeoPoint, withinM: Int = NEAR_M): Network? =
+        networks.filter { it.status != NetworkStatus.OFF }
+            .map { it to it.bbox.distanceTo(point) }
+            .filter { it.second <= withinM }
+            .minWithOrNull(compareBy<Pair<Network, Int>> { it.second }.thenBy { it.first.bbox.extent })
+            ?.first
+
     fun toJson(): JSONObject = JSONObject()
         .put("savedAt", savedAt)
         .put("networks", JSONArray().also { array -> others.forEach { array.put(it.toJson()) } })
 
     companion object {
+        /**
+         * Au-delà de cette distance de son emprise, un réseau n'est plus celui de l'endroit. La marge
+         * couvre l'erreur d'une position approximative, pas la ville voisine : Troyes est à une
+         * vingtaine de kilomètres de l'emprise de l'Île-de-France.
+         */
+        const val NEAR_M = 10_000
+
         /** Lit la réponse de `/api/reseaux`, ou le fichier que le téléphone en a gardé. */
         @Throws(IOException::class)
         fun parse(body: String, savedAt: Long? = null): NetworkCatalog {
@@ -225,17 +267,29 @@ class NetworkCatalogStore(private val file: File, private val download: () -> Li
         return catalog
     }
 
-    /** Vrai s'il faut redemander le catalogue : jamais reçu, ou depuis plus d'un jour. */
-    fun isStale(now: Long): Boolean {
+    /** Vrai s'il faut redemander le catalogue : jamais reçu, ou depuis plus de [maxAgeMs]. */
+    fun isStale(now: Long, maxAgeMs: Long = MAX_AGE_MS): Boolean {
         val savedAt = read().savedAt
         // Une date d'enregistrement dans le futur vient d'une horloge déréglée : elle ne prouve rien.
-        return savedAt <= 0L || now - savedAt !in 0 until MAX_AGE_MS
+        return savedAt <= 0L || now - savedAt !in 0 until maxAgeMs
     }
 
-    /** Redemande le catalogue à Tracéo. En cas d'échec, le fichier précédent reste en place. */
+    /**
+     * Redemande le catalogue à Tracéo. En cas d'échec, le fichier précédent reste en place.
+     *
+     * Un Tracéo qui ne connaît pas la route n'a pas d'autre réseau à proposer : le catalogue est alors
+     * vide, et non en panne. Sauf s'il a déjà donné des réseaux : c'est qu'il s'agit d'une panne, et le
+     * téléphone garde ce qu'il sait.
+     */
     @Throws(IOException::class)
     fun refresh(now: Long = System.currentTimeMillis()): NetworkCatalog {
-        val catalog = NetworkCatalog(download(), now)
+        val networks = try {
+            download()
+        } catch (e: TraceoException) {
+            if (e.kind != TraceoException.Kind.NOT_FOUND || read().others.isNotEmpty()) throw e
+            emptyList()
+        }
+        val catalog = NetworkCatalog(networks, now)
         synchronized(LOCK) {
             file.parentFile?.mkdirs()
             val tmp = File(file.parentFile, file.name + ".tmp")

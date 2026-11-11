@@ -55,6 +55,15 @@
                 android:layout_width="0dp"
                 android:layout_height="4dp"
                 android:layout_weight="1" />
+
+            <!-- L'étape « Réseau » n'existe que s'il y a un autre réseau que l'Île-de-France à proposer. -->
+            <View
+                android:id="@+id/step_segment_5"
+                android:layout_width="0dp"
+                android:layout_height="4dp"
+                android:layout_marginStart="4dp"
+                android:layout_weight="1"
+                android:visibility="gone" />
         </LinearLayout>
 
         <TextView
