@@ -146,7 +146,7 @@ class MainActivity : Activity() {
             entry?.let { getString(it.nameRes) } ?: getString(R.string.widget_name)
 
         val reconfigure = config != null && !proximity &&
-            DataSources.route(config.stop.stopIds, hasKey) == PassageRoute.RECONFIGURE
+            DataSources.route(config, hasKey) == PassageRoute.RECONFIGURE
         val needsAccess = config?.auto == true && !PositionReader(this).hasPreciseAccess
         val subtitle = view.findViewById<TextView>(R.id.item_widget_subtitle)
         val summary = if (proximity) nearby?.let(::summaryOf) else state

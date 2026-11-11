@@ -39,9 +39,10 @@ data class NearbyLine(
     val zone: String,
     val distanceM: Int,
 ) {
-    val stopId: String get() = "stop_area:IDFM:$zone"
+    /** Zone d'arrêt à interroger : celle de Tracéo en Île-de-France, la station du catalogue ailleurs. */
+    val stopId: String get() = if (Networks.isIdfm(line.networkId)) "stop_area:IDFM:$zone" else zone
 
-    fun toStop(): Stop = Stop(stopName, town, listOf(stopId))
+    fun toStop(): Stop = Stop(stopName, town, listOf(stopId), line.networkId)
 }
 
 /** Pourquoi une ligne est à ce rang. */
@@ -105,12 +106,14 @@ object NearbyRules {
      * le RER et le train comptent 150 m de moins et le tram 75 m. On garde ce qui reste à moins de
      * 400 m de plus que l'arrêt le plus proche, sans dépasser 2 km.
      *
+     * @param favorites clés des lignes favorites (cf. [Line.key])
+     * @param pickedLineKey clé de la ligne choisie à cet endroit
      * @param modes modes acceptés par la source de passages
      */
     fun rank(
         candidates: List<NearbyLine>,
         favorites: Set<String>,
-        pickedLineId: String?,
+        pickedLineKey: String?,
         nightService: Boolean,
         modes: Set<String>,
     ): NearbyRanking {
@@ -119,10 +122,10 @@ object NearbyRules {
         val noStop = nearest == null || nearest > SEARCH_CAP_M
 
         val ranked = usable.mapNotNull { c ->
-            val favorite = c.line.id in favorites
+            val favorite = c.line.key in favorites
             val effective = c.distanceM - railBonus(c.line)
             val reason = when {
-                c.line.id == pickedLineId -> NearbyReason.PICKED_HERE
+                c.line.key == pickedLineKey -> NearbyReason.PICKED_HERE
                 favorite && c.distanceM <= FAVORITE_REACH_M -> NearbyReason.FAVORITE
                 isNightLine(c.line) && !nightService -> null
                 !noStop && c.distanceM <= SEARCH_CAP_M && effective <= (nearest ?: 0) + TOLERANCE_M -> NearbyReason.NEAREST
@@ -190,27 +193,30 @@ object AnchorPolicy {
     }
 }
 
-/** Ce que l'usager a choisi à chaque endroit : le widget s'en souvient quand il y revient. */
+/**
+ * Ce que l'usager a choisi à chaque endroit : le widget s'en souvient quand il y revient. La ligne
+ * est retenue par sa clé ([Line.key]), qui porte son réseau hors Île-de-France.
+ */
 class PlaceChoices(private val entries: List<Entry> = emptyList()) {
 
-    data class Entry(val point: GeoPoint, val lineId: String, val at: Long)
+    data class Entry(val point: GeoPoint, val lineKey: String, val at: Long)
 
     fun lineAt(point: GeoPoint): String? =
         entries.map { it to it.point.distanceTo(point) }
             .filter { it.second <= PLACE_RADIUS_M }
             .minByOrNull { it.second }
-            ?.first?.lineId
+            ?.first?.lineKey
 
     /** Remplace le choix fait à cet endroit, en oubliant les plus anciens au-delà de [MAX_ENTRIES]. */
-    fun remember(point: GeoPoint, lineId: String, at: Long): PlaceChoices {
+    fun remember(point: GeoPoint, lineKey: String, at: Long): PlaceChoices {
         val others = entries.filter { it.point.distanceTo(point) > PLACE_RADIUS_M }
-        return PlaceChoices((others + Entry(point, lineId, at)).sortedByDescending { it.at }.take(MAX_ENTRIES))
+        return PlaceChoices((others + Entry(point, lineKey, at)).sortedByDescending { it.at }.take(MAX_ENTRIES))
     }
 
     fun toJson(): String {
         val array = JSONArray()
         entries.forEach {
-            array.put(JSONObject().put("lat", it.point.lat).put("lon", it.point.lon).put("line", it.lineId).put("at", it.at))
+            array.put(JSONObject().put("lat", it.point.lat).put("lon", it.point.lon).put("line", it.lineKey).put("at", it.at))
         }
         return array.toString()
     }
