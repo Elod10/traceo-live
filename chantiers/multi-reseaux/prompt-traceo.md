@@ -55,7 +55,7 @@ ni leur clé de cache nginx (RG-44). L'Île-de-France ne figure pas dans ce cata
    `id` en minuscules, chiffres et tirets. `bbox` : emprise des arrêts avec une marge (mesurée :
    latitude 48,1840 à 48,3989, longitude 3,9053 à 4,2441). `modes` parmi `metro, tram, rail, bus,
    boat, cable, funicular`. `status` : `ok`, `stale` (flux muet) ou `off`. `indexAt` : date de
-   compilation des horaires.
+   compilation des horaires, égale au `builtAt` de l'index (route 5) : l'appli compare les deux.
 2. `GET /api/reseaux/{id}/lines` :
    `{"lines":[{"id","code","name","color","textColor","mode":{"key","label"},"realtime"}]}`.
    `id` est une chaîne opaque (à Troyes : « 2B », « ZI TAD »), unique dans le réseau seulement.

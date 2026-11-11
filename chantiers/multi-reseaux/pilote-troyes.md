@@ -94,7 +94,7 @@ compte.
 - `refreshSec` : cadence de relevé visée.
 - `status` : `ok`, `stale` (flux muet) ou `off` (réseau coupé).
 - `indexAt` : date de compilation des horaires ; elle change quand l'appli doit recharger lignes,
-  arrêts et index.
+  arrêts et index. Elle est égale au `builtAt` de l'index du réseau : l'appli compare les deux.
 
 ### `GET /api/reseaux/{id}/lines`
 
