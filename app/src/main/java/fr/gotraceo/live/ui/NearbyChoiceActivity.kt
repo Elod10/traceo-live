@@ -114,7 +114,8 @@ class NearbyChoiceActivity : Activity() {
 
     /** Chaque ligne demande une requête : seules les premières sont interrogées. */
     private fun loadPassages(ranked: List<RankedLine>) {
-        val source = Sources.passages(this@NearbyChoiceActivity)
+        // Les lignes proposées sont toutes du réseau où l'on se trouve.
+        val source = Sources.passages(this@NearbyChoiceActivity, ranked.firstOrNull()?.nearby?.line?.networkId ?: return)
         val hasKey = prefs.hasApiKey
         ranked.forEach { line ->
             scope.launch {
@@ -126,10 +127,10 @@ class NearbyChoiceActivity : Activity() {
 
     private fun nextPassage(snapshot: PassageSnapshot, nearby: NearbyLine, hasKey: Boolean): Passage? {
         val now = System.currentTimeMillis()
-        val departures = if (hasKey) {
-            snapshot.departures
-        } else {
+        val departures = if (DataSources.dropsTerminusArrivals(nearby.line.networkId, viaTraceo = !hasKey)) {
             Directions.withoutTerminusArrivals(snapshot.departures, nearby.stopName)
+        } else {
+            snapshot.departures
         }
         val first = Directions.upcoming(departures, now).firstOrNull { !it.isCancelled } ?: return null
         return WidgetContent.passage(first, now, nearby.line.mode)

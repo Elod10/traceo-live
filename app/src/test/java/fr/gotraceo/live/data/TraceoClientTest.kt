@@ -8,14 +8,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Assert.fail
 import org.junit.Before
 import org.junit.Test
-import java.io.BufferedReader
-import java.io.InputStreamReader
-import java.net.InetAddress
-import java.net.ServerSocket
-import java.net.Socket
-import java.util.Collections
 import java.util.concurrent.ConcurrentHashMap
-import kotlin.concurrent.thread
 
 /** Teste [TraceoClient] contre un faux serveur local, avec les réponses du contrat de Tracéo. */
 class TraceoClientTest {
@@ -26,8 +19,7 @@ class TraceoClientTest {
         const val STATIONS_PATH = "/api/stations"
         const val LINES_PATH = "/api/lines"
 
-        /** Statut de [respond] qui coupe la connexion sans rien répondre. */
-        const val DROP = -1
+        const val DROP = FakeServer.DROP
 
         const val LINES = """{"lines": [
             {"id": "line:IDFM:C01742", "code": "A", "name": "A", "color": "#EB2132", "textColor": "#FFFFFF",
@@ -58,25 +50,13 @@ class TraceoClientTest {
             "fetchedAt": "2026-11-04T22:34:01.006Z", "ageSec": 122, "fresh": true}"""
     }
 
-    private class Request(val path: String, val target: String, val headers: Map<String, String>)
-
-    private lateinit var server: ServerSocket
-    private val requests: MutableList<Request> = Collections.synchronizedList(ArrayList())
-    private val responses = HashMap<String, MutableList<Pair<Int, String>>>()
+    private lateinit var server: FakeServer
+    private val requests: MutableList<FakeServer.Request> get() = server.requests
+    private val responses: FakeServer get() = server
 
     @Before
     fun setUp() {
-        server = ServerSocket(0, 50, InetAddress.getByName("127.0.0.1"))
-        thread(isDaemon = true) {
-            while (!server.isClosed) {
-                val socket = try {
-                    server.accept()
-                } catch (e: Exception) {
-                    break
-                }
-                socket.use { handle(it) }
-            }
-        }
+        server = FakeServer()
     }
 
     @After
@@ -84,47 +64,13 @@ class TraceoClientTest {
         server.close()
     }
 
-    /** Ajoute une réponse pour ce chemin : elles sont servies dans l'ordre, la dernière se répète. */
-    private fun respond(path: String, status: Int, body: String) {
-        synchronized(responses) { responses.getOrPut(path) { ArrayList() }.add(status to body) }
-    }
-
-    private fun nextResponse(path: String): Pair<Int, String> = synchronized(responses) {
-        val queue = responses[path] ?: return@synchronized 500 to "{}"
-        if (queue.size > 1) queue.removeAt(0) else queue.first()
-    }
-
-    private fun handle(socket: Socket) {
-        val reader = BufferedReader(InputStreamReader(socket.getInputStream(), Charsets.UTF_8))
-        val requestLine = reader.readLine() ?: return
-        val headers = HashMap<String, String>()
-        while (true) {
-            val line = reader.readLine() ?: break
-            if (line.isEmpty()) break
-            val idx = line.indexOf(':')
-            if (idx > 0) headers[line.substring(0, idx).trim().lowercase()] = line.substring(idx + 1).trim()
-        }
-        val target = requestLine.split(' ').getOrElse(1) { "" }
-        val path = target.substringBefore('?')
-        requests += Request(path, target, headers)
-
-        val (status, body) = nextResponse(path)
-        if (status == DROP) return
-        val bytes = body.toByteArray(Charsets.UTF_8)
-        val out = socket.getOutputStream()
-        out.write(
-            ("HTTP/1.1 $status X\r\nContent-Type: application/json; charset=utf-8\r\n" +
-                "Content-Length: ${bytes.size}\r\nConnection: close\r\n\r\n").toByteArray(Charsets.UTF_8),
-        )
-        out.write(bytes)
-        out.flush()
-    }
+    private fun respond(path: String, status: Int, body: String) = server.respond(path, status, body)
 
     private val warmed: MutableSet<String> = ConcurrentHashMap.newKeySet()
 
-    private fun client() = TraceoClient("http://127.0.0.1:${server.localPort}", warmed)
+    private fun client() = TraceoClient(server.url, warmed)
 
-    private fun paths() = requests.map { it.path }
+    private fun paths() = server.paths()
 
     private fun expectKind(kind: TraceoException.Kind, block: () -> Unit): TraceoException {
         try {

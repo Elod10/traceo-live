@@ -312,7 +312,8 @@ object AutoMode {
         val ranked = ranking?.list.orEmpty()
         if (ranked.isEmpty()) return null
         val hasKey = prefs.hasApiKey
-        val source = Sources.passages(prefs.appContext)
+        // Les lignes classées sont toutes du réseau où l'on se trouve.
+        val source = Sources.passages(prefs.appContext, ranked.first().nearby.line.networkId)
         val now = System.currentTimeMillis()
         var offline = false
         val chosen = withContext(Dispatchers.IO) {
@@ -354,7 +355,7 @@ object AutoMode {
             return
         }
         val next = configFor(widgetId, nearby, config.theme)
-        val source = Sources.passages(prefs.appContext)
+        val source = Sources.passages(prefs.appContext, nearby.line.networkId)
         val result = withContext(Dispatchers.IO) { fetch(source, nearby) }
         val state = WidgetStates.from(next, listOf(result), null, now, removeTerminusArrivals = !prefs.hasApiKey)
         WidgetUpdater.exclusive {
