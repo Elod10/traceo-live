@@ -224,7 +224,7 @@ class RowAdapter(private val context: Context, private val cells: Boolean = fals
     }
 
     private fun badgeFor(line: Line, heightDp: Float): Bitmap {
-        val key = "${line.mode}|${line.shortName}|${line.color}|${line.textColor}|$heightDp"
+        val key = "${line.networkId}|${line.mode}|${line.shortName}|${line.color}|${line.textColor}|$heightDp"
         return badgeCache.get(key) ?: BadgeRenderer.render(context, line, heightDp).also { badgeCache.put(key, it) }
     }
 

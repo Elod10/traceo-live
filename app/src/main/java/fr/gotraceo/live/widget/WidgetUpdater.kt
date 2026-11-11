@@ -9,8 +9,11 @@ import android.os.Build
 import android.os.PowerManager
 import android.util.Log
 import fr.gotraceo.live.data.DataSources
+import fr.gotraceo.live.data.NetworkCatalog
+import fr.gotraceo.live.data.Networks
 import fr.gotraceo.live.data.PassageRoute
 import fr.gotraceo.live.data.PassageSnapshot
+import fr.gotraceo.live.data.PassageSource
 import fr.gotraceo.live.data.Prefs
 import fr.gotraceo.live.data.RefreshSchedule
 import fr.gotraceo.live.data.WidgetStates
@@ -26,14 +29,15 @@ import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.sync.withPermit
+import kotlinx.coroutines.withContext
 import java.util.concurrent.ConcurrentHashMap
 
 /**
  * Récupération des passages et mise à jour des widgets.
  *
  * Un « tick » non réveillant (AlarmManager.RTC) est programmé chaque minute tant qu'il existe
- * des widgets : il recalcule les temps d'attente affichés et relance une requête (Tracéo sans clé,
- * PRIM avec une clé) quand l'intervalle d'actualisation choisi est écoulé. Comme l'alarme ne
+ * des widgets : il recalcule les temps d'attente affichés et relance une requête (Tracéo sans clé
+ * ou hors Île-de-France, PRIM avec une clé) quand l'intervalle d'actualisation choisi est écoulé. Comme l'alarme ne
  * réveille pas l'appareil, aucune requête n'est faite écran éteint.
  *
  * L'alarme est exacte : depuis Android 12, une alarme simple peut arriver jusqu'à une heure après
@@ -129,31 +133,46 @@ object WidgetUpdater {
             // tick programmé : c'est aussi ce qui le relance s'il s'était arrêté.
             scheduleTick(app)
         }
+        refreshCatalogIfUsed(app, ids)
+    }
+
+    /**
+     * Un widget d'un autre réseau que l'Île-de-France tient du catalogue sa cadence et ses mentions :
+     * il est redemandé une fois par jour, après l'actualisation et écran allumé. Sans un tel widget,
+     * rien n'est demandé à Tracéo.
+     */
+    private suspend fun refreshCatalogIfUsed(context: Context, ids: IntArray) {
+        if (!isInteractive(context)) return
+        val prefs = Prefs(context)
+        if (ids.none { id -> prefs.config(id)?.let { !Networks.isIdfm(it.networkId) } == true }) return
+        withContext(Dispatchers.IO) { Sources.catalog(context).fresh() }
     }
 
     private suspend fun refreshLocked(context: Context, ids: IntArray, force: Boolean) {
         val prefs = Prefs(context)
         val now = System.currentTimeMillis()
         val hasKey = prefs.hasApiKey
-        val timing = Timing.of(prefs)
+        val timing = Timing.of(context, prefs)
         // Écran éteint (ex. rafraîchissement périodique déclenché par Android) : aucune requête,
         // sauf action explicite de l'utilisateur.
         val screenOn = isInteractive(context)
         val nearby = ids.filter { WidgetProviders.isProximity(context, it) }.toSet()
-        val due = ids.associateWith { timing.dueAt(context, prefs, it) }
+        val due = ids.associateWith { timing.dueAt(context, it) }
         val dueNow = ids.any { id -> due[id]?.let { it <= now } == true }
-        // En direct, les widgets presque dus partent avec les autres : ils restent ensuite alignés.
-        // Avec Tracéo, inutile : tous attendent le même relevé, annoncé par `nextAt`.
-        val alignUntil = if (dueNow && !timing.followsTraceo) now + timing.refreshMinutes * 60_000L / 2 else now
         val targets = ids.filter { id ->
             val config = prefs.config(id)
+            // En direct, les widgets presque dus partent avec les autres : ils restent ensuite alignés.
+            // Avec Tracéo, inutile : tous ceux d'un réseau attendent le même relevé, annoncé par `nextAt`.
+            val source = timing.of(id)
+            val alignUntil = if (dueNow && !source.followsTraceo) now + source.refreshMinutes * 60_000L / 2 else now
             // Un widget à reconfigurer ne fait aucun appel, même à la demande : Tracéo répondrait 404.
-            config != null && DataSources.route(config.stop.stopIds, hasKey) != PassageRoute.RECONFIGURE &&
+            config != null && DataSources.route(config, hasKey) != PassageRoute.RECONFIGURE &&
                 (force || (screenOn && due[id]?.let { it <= alignUntil } == true))
         }.toSet()
         ids.filter { it !in targets }.forEach { render(context, it) }
         if (targets.isEmpty()) return
-        Log.i(TAG, "Actualisation de ${targets.size} widget(s) via ${if (timing.followsTraceo) "Tracéo" else "PRIM"}")
+        val sources = targets.map { if (timing.of(it).followsTraceo) "Tracéo" else "PRIM" }.distinct().sorted()
+        Log.i(TAG, "Actualisation de ${targets.size} widget(s) via ${sources.joinToString(" et ")}")
 
         targets.forEach { render(context, it, refreshing = true) }
         // Le format À proximité et les widgets d'une ligne travaillent chacun de leur côté : une
@@ -187,21 +206,23 @@ object WidgetUpdater {
     }
 
     private suspend fun refreshLines(context: Context, prefs: Prefs, ids: List<Int>, hasKey: Boolean) {
-        val source = Sources.passages(context)
+        // Une source par réseau : la clé PRIM ne sert qu'à l'Île-de-France.
+        val sources = HashMap<String, PassageSource>()
         coroutineScope {
-            // Requêtes partagées entre widgets portant sur le même point d'arrêt et la même ligne,
-            // et jamais plus de quelques-unes à la fois : pas de rafale vers la source.
-            val requests = HashMap<Pair<String, String>, Deferred<Result<PassageSnapshot>>>()
+            // Requêtes partagées entre widgets portant sur le même point d'arrêt et la même ligne du
+            // même réseau, et jamais plus de quelques-unes à la fois : pas de rafale vers la source.
+            val requests = HashMap<Triple<String, String, String>, Deferred<Result<PassageSnapshot>>>()
             val parallel = Semaphore(MAX_PARALLEL_REQUESTS)
-            fun fetch(stopId: String, lineId: String): Deferred<Result<PassageSnapshot>> =
-                requests.getOrPut(stopId to lineId) {
+            fun fetch(networkId: String, stopId: String, lineId: String): Deferred<Result<PassageSnapshot>> =
+                requests.getOrPut(Triple(networkId, stopId, lineId)) {
+                    val source = sources.getOrPut(networkId) { Sources.passages(context, networkId) }
                     async(Dispatchers.IO) { parallel.withPermit { runCatching { source.passages(stopId, lineId) } } }
                 }
 
             val perWidget = ids.mapNotNull { id ->
                 val config = prefs.config(id) ?: return@mapNotNull null
                 val stopIds = config.directions.keys.ifEmpty { config.stop.stopIds.toSet() }
-                Triple(id, config, stopIds.map { fetch(it, config.line.id) })
+                Triple(id, config, stopIds.map { fetch(config.networkId, it, config.line.id) })
             }
             perWidget.forEach { (id, config, deferred) ->
                 val results = deferred.awaitAll()
@@ -219,36 +240,65 @@ object WidgetUpdater {
     /** Vrai si l'actualisation automatique de ce widget est due : écran allumé et échéance passée. */
     fun isDue(context: Context, widgetId: Int, now: Long): Boolean {
         if (!isInteractive(context)) return false
-        val prefs = Prefs(context)
-        return Timing.of(prefs).dueAt(context, prefs, widgetId)?.let { it <= now } == true
+        return Timing.of(context, Prefs(context)).dueAt(context, widgetId)?.let { it <= now } == true
     }
 
-    /** Réglages qui fixent les échéances : source, intervalle, relevé annoncé par Tracéo et décalage. */
-    private class Timing(
+    /** Ce qui fixe les échéances des widgets d'un réseau : source, intervalle et relevé annoncé par Tracéo. */
+    private class SourceTiming(
         val followsTraceo: Boolean,
         val refreshMinutes: Int,
-        private val traceoNextAt: Long,
-        private val offsetMs: Long,
-    ) {
-        fun dueAt(context: Context, prefs: Prefs, widgetId: Int): Long? {
+        val traceoNextAt: Long,
+        /** Cadence de relevé du réseau chez Tracéo. */
+        val sourceMinutes: Int,
+    )
+
+    /**
+     * Échéances des widgets. Chaque réseau a les siennes : l'Île-de-France dépend de la clé PRIM et de
+     * son quota, les autres de la cadence annoncée par le catalogue.
+     */
+    private class Timing(private val prefs: Prefs, private val catalog: NetworkCatalog) {
+        private val offsetMs = prefs.refreshOffsetMs
+        private val chosenMinutes = prefs.refreshMinutes
+        private val byNetwork = HashMap<String, SourceTiming>()
+
+        fun of(networkId: String): SourceTiming = byNetwork.getOrPut(networkId) {
+            if (Networks.isIdfm(networkId)) {
+                val usesPrim = prefs.usesPrim
+                SourceTiming(
+                    followsTraceo = !usesPrim,
+                    refreshMinutes = DataSources.refreshMinutes(chosenMinutes, usesPrim),
+                    traceoNextAt = prefs.traceoNextAt(),
+                    sourceMinutes = DataSources.TRACEO_MIN_REFRESH_MINUTES,
+                )
+            } else {
+                // Réseau absent du catalogue du téléphone : la cadence francilienne, la plus lente.
+                val sourceMinutes = catalog.byId(networkId)?.sourceMinutes ?: DataSources.TRACEO_MIN_REFRESH_MINUTES
+                SourceTiming(
+                    followsTraceo = true,
+                    refreshMinutes = DataSources.refreshMinutes(chosenMinutes, sourceMinutes),
+                    traceoNextAt = prefs.traceoNextAt(networkId),
+                    sourceMinutes = sourceMinutes,
+                )
+            }
+        }
+
+        /** Les échéances du réseau d'un widget ; celles de l'Île-de-France s'il n'est pas configuré. */
+        fun of(widgetId: Int): SourceTiming = of(prefs.config(widgetId)?.networkId ?: Networks.IDFM)
+
+        fun dueAt(context: Context, widgetId: Int): Long? {
             val attemptedAt = if (WidgetProviders.isProximity(context, widgetId)) {
                 prefs.proximity(widgetId)?.attemptedAt
             } else {
                 prefs.state(widgetId)?.attemptedAt
             }
-            return RefreshSchedule.dueAt(attemptedAt, refreshMinutes, followsTraceo, traceoNextAt, offsetMs)
+            val source = of(widgetId)
+            return RefreshSchedule.dueAt(
+                attemptedAt, source.refreshMinutes, source.followsTraceo, source.traceoNextAt, offsetMs, source.sourceMinutes,
+            )
         }
 
         companion object {
-            fun of(prefs: Prefs): Timing {
-                val usesPrim = prefs.usesPrim
-                return Timing(
-                    followsTraceo = !usesPrim,
-                    refreshMinutes = DataSources.refreshMinutes(prefs.refreshMinutes, usesPrim),
-                    traceoNextAt = prefs.traceoNextAt,
-                    offsetMs = prefs.refreshOffsetMs,
-                )
-            }
+            fun of(context: Context, prefs: Prefs): Timing = Timing(prefs, Sources.catalog(context).read())
         }
     }
 
@@ -294,9 +344,9 @@ object WidgetUpdater {
         }
         val now = System.currentTimeMillis()
         val prefs = Prefs(context)
-        val timing = Timing.of(prefs)
+        val timing = Timing.of(context, prefs)
         // Le tick de chaque minute, ou plus tôt si un widget est dû avant (prochain relevé de Tracéo).
-        val nextDue = ids.asList().mapNotNull { timing.dueAt(context, prefs, it) }.filter { it > now }.minOrNull()
+        val nextDue = ids.asList().mapNotNull { timing.dueAt(context, it) }.filter { it > now }.minOrNull()
         val trigger = minOf(RefreshSchedule.nextTickAt(now, prefs.refreshOffsetMs), nextDue ?: Long.MAX_VALUE)
         // RTC (non réveillant) : rien n'est exécuté tant que l'écran est éteint.
         try {
