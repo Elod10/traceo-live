@@ -41,6 +41,11 @@ class Prefs(context: Context) {
         next
     }
 
+    /** Oublie la consommation du jour : elle était celle d'une autre clé. */
+    fun resetPrimUsage() = synchronized(usageLock) {
+        settings.edit().remove(KEY_PRIM_USAGE).apply()
+    }
+
     /** Vrai si la clé a épuisé son quota du jour : les widgets passent alors par Tracéo. */
     val primPaused: Boolean get() = hasApiKey && primUsage().isExhausted(PrimDay.today())
 

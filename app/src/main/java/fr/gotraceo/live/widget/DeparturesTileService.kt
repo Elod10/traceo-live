@@ -50,7 +50,12 @@ class DeparturesTileService : TileService() {
         QuickTile.listening = WeakReference(this)
         show()
         val id = QuickTile.widgetId(this) ?: return
-        if (WidgetUpdater.isDue(this, id, System.currentTimeMillis())) WidgetUpdater.requestRefresh(this, id)
+        if (WidgetUpdater.isDue(this, id, System.currentTimeMillis())) {
+            WidgetUpdater.requestRefresh(this, id)
+        } else {
+            // Rien à demander, mais le tick doit tourner pour que la tuile et le widget suivent l'heure.
+            WidgetUpdater.scheduleTick(this)
+        }
     }
 
     override fun onStopListening() {

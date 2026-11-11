@@ -207,6 +207,14 @@ class PrimClientTest {
         assertTrue(requests.isEmpty())
     }
 
+    @Test
+    fun aKeyPastedWithAnInvisibleCharacterIsRefusedWithoutCrashing() {
+        // Un saut de ligne au milieu de la clé n'entre pas dans un en-tête HTTP : la requête ne part pas,
+        // et l'erreur doit rester de celles que l'écran de la clé et les widgets savent afficher.
+        expectKind(PrimException.Kind.AUTH) { client("sec\nret").departures("IDFM:2", null) }
+        assertTrue(requests.isEmpty())
+    }
+
     private fun expectKind(kind: PrimException.Kind, block: () -> Unit) {
         try {
             block()

@@ -133,12 +133,22 @@ object Directions {
 
     private val FINAL_TOWN_SUFFIX = Regex("\\s*\\([^()]*\\)\\s*$")
 
-    /** Passages à venir triés par heure (on garde les véhicules encore à quai). */
+    /**
+     * Passé ce délai après son heure, un véhicule « à quai » est parti : le suivant prend sa place
+     * sans attendre la mise à jour.
+     */
+    const val AT_STOP_GRACE_MS = 2L * 60 * 1000
+
+    /**
+     * Passages à venir triés par heure. Un véhicule à quai reste affiché un peu après son heure, mais
+     * pas sans fin : faute de nouvelles de la source (hors connexion, actualisation manuelle), il
+     * resterait « à quai » en tête du widget.
+     */
     fun upcoming(departures: List<Departure>, now: Long, graceMs: Long = 60_000L): List<Departure> =
         departures
             .filter { d ->
                 val leave = d.leaveTime ?: return@filter false
-                d.atStop || leave >= now - graceMs
+                leave >= now - if (d.atStop) maxOf(graceMs, AT_STOP_GRACE_MS) else graceMs
             }
             .distinctBy { Triple(normalizeLabel(it.destination), it.displayTime, it.stopId) }
             .sortedBy { it.displayTime ?: Long.MAX_VALUE }

@@ -167,4 +167,31 @@ object RefreshSchedule {
         val candidate = Math.floorDiv(now - offset, MINUTE_MS) * MINUTE_MS + offset + MINUTE_MS
         return candidate
     }
+
+    /**
+     * Période du filet de sécurité : une alarme répétée, qu'Android reprogramme lui-même. Chaque tick
+     * la repousse, si bien qu'elle ne se déclenche que si les ticks se sont arrêtés (processus tué
+     * pendant un tick, broadcast perdu) ; elle les relance alors, sans attendre la mise à jour
+     * périodique des widgets, qui ne passe que toutes les 30 minutes.
+     *
+     * Elle dépasse nettement la minute du tick, pour ne jamais partir avec lui.
+     */
+    const val WATCHDOG_INTERVAL_MS = 3 * MINUTE_MS
+
+    /**
+     * Temps laissé à un traitement lancé par un broadcast avant de rendre la main à Android.
+     *
+     * Android tue sans prévenir une application en arrière-plan dont le récepteur dépasse 10 s pour un
+     * broadcast prioritaire, et 60 s pour les autres. Or le toucher d'un widget arrive en broadcast
+     * prioritaire : le lanceur l'envoie avec FLAG_ACTIVITY_NEW_TASK, qui a la même valeur que
+     * FLAG_RECEIVER_FOREGROUND.
+     *
+     * @param userAction vrai pour une actualisation demandée par l'usager (toucher, bouton)
+     * @param foreground vrai si le broadcast porte FLAG_RECEIVER_FOREGROUND
+     */
+    fun broadcastBudgetMs(userAction: Boolean, foreground: Boolean): Long =
+        if (userAction || foreground) FOREGROUND_BUDGET_MS else BACKGROUND_BUDGET_MS
+
+    const val FOREGROUND_BUDGET_MS = 7_000L
+    const val BACKGROUND_BUDGET_MS = 40_000L
 }

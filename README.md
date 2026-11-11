@@ -70,7 +70,15 @@ viennent toujours de **PRIM**, la plateforme d'Île-de-France Mobilités, par l'
 
   Le temps d'attente indique « 3 min », « Imminent », « À quai » ou « Supprimé » ; les retards et
   les échecs d'actualisation sont signalés en couleur. La liste affiche aussi l'heure, la voie (avec
-  une clé) et le code mission des trains.
+  une clé) et le code mission des trains. Un véhicule « À quai » cède sa place au suivant 2 minutes
+  après son heure, même si le widget n'a pas pu s'actualiser entre-temps.
+
+  Le lanceur reçoit chaque widget dans ses deux tailles, portrait et paysage, et affiche celle de sa
+  propre orientation : le widget ne dépend pas de l'orientation de l'application au premier plan.
+  Quand la hauteur manque (widget rétréci à une rangée, écran d'accueil en paysage), un format sur deux
+  rangées cède la place à son équivalent sur une rangée, celui que le widget Automatique choisirait :
+  Grand chiffre devient Frise ou Un sens, Deux sens et Deux sens avec frise deviennent Deux sens compact
+  ou Un sens. Train et voie et Liste des départs rétrécissent d'abord, pour garder la voie et la liste.
 - **Relevé daté** : sans clé, le widget indique l'heure du relevé de Tracéo, pas celle du téléphone, avec
   la mention « PRIM via Tracéo » si la place le permet, sinon « Tracéo ». Il signale un relevé ancien
   (plus de 150 s, ce qui est normal entre 2 h et 5 h). Le format Pastille manque de place : il n'indique
@@ -93,6 +101,15 @@ viennent toujours de **PRIM**, la plateforme d'Île-de-France Mobilités, par l'
     d'Android 14, l'appli la propose à l'enregistrement de chaque nouveau widget tant
     qu'elle manque, et une carte de l'accueil y mène. Sans elle, le tick reste approximatif et
     les temps d'attente peuvent avoir plusieurs minutes de retard.
+  - **Tick** : l'alarme de chaque minute est à usage unique, et l'application la reprogramme avant tout
+    travail, à la fin de chaque actualisation et à l'ouverture de l'application. Si elle se perd quand
+    même (processus tué pendant un tick), une alarme répétée toutes les 3 minutes, que chaque tick
+    repousse et qu'Android reprogramme lui-même, la relance. Les widgets À proximité et les widgets
+    d'une ligne s'actualisent en parallèle : une source lente pour les uns ne retarde pas les autres.
+  - **Toucher** : Android livre le toucher d'un widget en broadcast prioritaire et tue sans prévenir
+    l'application qui le garde plus de 10 s. Elle le rend donc au bout de 7 s au plus (40 s pour un
+    tick, qui en a 60) ; si le réseau traîne, l'actualisation se termine en dehors, et le widget quitte
+    « … » pour son dernier état connu en attendant.
   - **Calage sur Tracéo** : sans clé, chaque réponse annonce l'heure du prochain relevé (`nextAt`) ; les
     widgets attendent ce relevé au lieu d'interroger à heure fixe, au plus une fois toutes les 30 s.
   - **Étalement** : chaque installation tire au hasard un décalage de 2 à 40 s, ajouté au `nextAt` et

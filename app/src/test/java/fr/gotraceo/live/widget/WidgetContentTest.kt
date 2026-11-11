@@ -153,6 +153,90 @@ class WidgetContentTest {
     }
 
     @Test
+    fun aTallFormatTooShortGivesWayToItsOneRowEquivalent() {
+        fun fitting(format: WidgetFormat, w: Float, h: Float, single: Boolean = false) = format.fitting(w, h, single)
+
+        // À sa taille, ou un peu rétréci, chaque format garde son dessin.
+        WidgetFormat.entries.forEach { assertEquals(it, fitting(it, it.baseWidth, it.baseHeight)) }
+        assertEquals(WidgetFormat.DEUX_SENS_LARGE, fitting(WidgetFormat.DEUX_SENS_LARGE, 348f, 150f))
+        // Écran d'accueil en paysage : deux rangées y sont moins hautes qu'une seule en portrait.
+        assertEquals(WidgetFormat.COMPACT, fitting(WidgetFormat.DEUX_SENS_LARGE, 650f, 120f))
+        assertEquals(WidgetFormat.COMPACT, fitting(WidgetFormat.DEUX_SENS, 320f, 120f))
+        assertEquals(WidgetFormat.FRISE, fitting(WidgetFormat.GRAND_CHIFFRE, 320f, 120f, single = true))
+        // Widget rétréci à une rangée en portrait : trop étroit pour deux sens, comme l'entrée automatique.
+        assertEquals(WidgetFormat.COMPACT, fitting(WidgetFormat.DEUX_SENS_LARGE, 348f, 110f))
+        assertEquals(WidgetFormat.UN_SENS, fitting(WidgetFormat.DEUX_SENS, 172f, 110f))
+        assertEquals(WidgetFormat.UN_SENS, fitting(WidgetFormat.GRAND_CHIFFRE, 172f, 110f, single = true))
+    }
+
+    @Test
+    fun theTrackAndTheListShrinkFurtherBeforeGivingWay() {
+        // Ni la voie ni la liste des départs n'ont d'équivalent sur une rangée.
+        assertEquals(WidgetFormat.TRAIN, WidgetFormat.TRAIN.fitting(320f, 120f, singleDirection = true))
+        assertEquals(WidgetFormat.TRAIN, WidgetFormat.TRAIN.fitting(172f, 103f, singleDirection = true))
+        assertEquals(WidgetFormat.UN_SENS, WidgetFormat.TRAIN.fitting(172f, 100f, singleDirection = true))
+        assertEquals(WidgetFormat.LISTE, WidgetFormat.LISTE.fitting(650f, 120f, singleDirection = false))
+        assertEquals(WidgetFormat.LISTE, WidgetFormat.LISTE.fitting(348f, 92f, singleDirection = false))
+        assertEquals(WidgetFormat.COMPACT, WidgetFormat.LISTE.fitting(348f, 85f, singleDirection = false))
+        assertEquals(WidgetFormat.FRISE, WidgetFormat.LISTE.fitting(348f, 85f, singleDirection = true))
+        assertEquals(WidgetFormat.UN_SENS, WidgetFormat.LISTE.fitting(180f, 85f, singleDirection = false))
+    }
+
+    @Test
+    fun formatsOnOneRowAndTheNearbyFormatNeverGiveWay() {
+        listOf(WidgetFormat.PASTILLE, WidgetFormat.UN_SENS, WidgetFormat.FRISE, WidgetFormat.COMPACT, WidgetFormat.PROXIMITE)
+            .forEach { assertEquals(it, it.fitting(650f, 40f, singleDirection = false)) }
+    }
+
+    @Test
+    fun theDrawingShrinksRatherThanOverflowWhenTheHeightIsShort() {
+        // Dans ses limites habituelles, l'échelle ne change pas.
+        assertEquals(1f, WidgetFormat.DEUX_SENS_LARGE.sceneScale(348f, 192f), 0.001f)
+        assertEquals(0.75f, WidgetFormat.DEUX_SENS_LARGE.sceneScale(250f, 192f), 0.001f)
+        assertEquals(1.6f, WidgetFormat.PASTILLE.sceneScale(400f, 400f), 0.001f)
+        // La liste tient encore à 110 dp de haut : elle garde son échelle et montre moins de départs.
+        assertEquals(0.75f, WidgetFormat.LISTE.sceneScale(348f, 110f), 0.001f)
+        // Une frise sur une rangée d'un écran en paysage (55 dp) : tout le dessin (92 dp) tient.
+        val scale = WidgetFormat.FRISE.sceneScale(650f, 55f)
+        assertEquals(92f, 55f / scale, 0.5f)
+        // Plus bas encore, le dessin ne rétrécit plus : il deviendrait illisible.
+        assertEquals(0.5f, WidgetFormat.FRISE.sceneScale(650f, 30f), 0.001f)
+    }
+
+    @Test
+    fun theChosenFormatIsDrawnAsItsEquivalentWhenItCannotFit() {
+        val model = WidgetModels.build(
+            config(metro, allDirections), state(dep("A", 5), dep("B", 7, stopId = "IDFM:2")), hasApiKey = true,
+            refreshing = false, widthDp = 650f, heightDp = 120f, now = now, fixedFormat = WidgetFormat.DEUX_SENS_LARGE,
+        )
+        assertEquals(WidgetFormat.COMPACT, model.format)
+    }
+
+    // --- Tailles données par le lanceur ---------------------------------------------------------
+
+    @Test
+    fun theLauncherGivesOneSizePerOrientation() {
+        // Un widget 4×2 sur un téléphone : 328×190 dp en portrait, 658×94 dp en paysage.
+        val sizes = WidgetSizes.of(minWidth = 328, maxWidth = 658, minHeight = 94, maxHeight = 190)
+        assertEquals(WidgetSize(328f, 190f), sizes.portrait)
+        assertEquals(WidgetSize(658f, 94f), sizes.landscape)
+        assertEquals(sizes.landscape, sizes.otherLandscape)
+    }
+
+    @Test
+    fun aWidgetWithASingleSizeIsDrawnOnce() {
+        assertNull(WidgetSizes.of(300, 300, 150, 150).otherLandscape)
+        // Un lanceur qui ne dit rien : la taille de la maquette.
+        val unknown = WidgetSizes.of(0, 0, 0, 0)
+        assertEquals(WidgetSize(348f, 192f), unknown.portrait)
+        assertNull(unknown.otherLandscape)
+        // Une seule orientation renseignée sert pour les deux.
+        val portraitOnly = WidgetSizes.of(minWidth = 328, maxWidth = 0, minHeight = 0, maxHeight = 190)
+        assertEquals(WidgetSize(328f, 190f), portraitOnly.landscape)
+        assertNull(portraitOnly.otherLandscape)
+    }
+
+    @Test
     fun twoDirectionFormatsAreIdentified() {
         val both = WidgetFormat.entries.filter { it.showsBothDirections }
         assertEquals(
@@ -395,6 +479,17 @@ class WidgetContentTest {
         width: Float = 348f,
         height: Float = 192f,
     ) = WidgetModels.build(config, state, hasApiKey, refreshing = false, widthDp = width, heightDp = height, now = now)
+
+    @Test
+    fun aVehicleLongGoneDoesNotStayAtThePlatformOnAWidgetThatCannotRefresh() {
+        // Dernier relevé il y a longtemps : le métro « à quai » est parti, le suivant passe en tête.
+        val stale = model(config(metro, oneDirection), state(dep("Château de Vincennes", -3, atStop = true), dep("Château de Vincennes", 4)))
+        assertEquals(listOf(WaitKind.MINUTES), stale.passages.map { it.kind })
+        assertEquals(4, stale.passages.single().minutes)
+        // Tout juste à quai, il reste affiché.
+        val fresh = model(config(metro, oneDirection), state(dep("Château de Vincennes", -1, atStop = true), dep("Château de Vincennes", 4)))
+        assertEquals(listOf(WaitKind.AT_STOP, WaitKind.MINUTES), fresh.passages.map { it.kind })
+    }
 
     @Test
     fun noticesWhenThereIsNothingToShow() {

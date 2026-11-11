@@ -24,8 +24,9 @@ object WidgetTexts {
         val manager = AppWidgetManager.getInstance(context)
         val format = WidgetProviders.formatOf(manager.getAppWidgetInfo(widgetId)?.provider?.className)
         val config = prefs.config(widgetId) ?: return null
-        // La taille du widget fixe le nombre de lignes connues du format À proximité.
-        val (width, height) = WidgetRenderer.widgetSize(context, manager.getAppWidgetOptions(widgetId))
+        // La taille du widget fixe le nombre de lignes connues du format À proximité. Celle du portrait :
+        // l'orientation de l'écran au moment où la notification est écrite ne dit rien de l'écran d'accueil.
+        val (width, height) = WidgetRenderer.widgetSizes(manager.getAppWidgetOptions(widgetId)).portrait
         return if (format == WidgetFormat.PROXIMITE) {
             val model = WidgetModels.buildProximity(config, prefs.proximity(widgetId), false, width, height, now, night = true)
             WidgetText(config, model, null)

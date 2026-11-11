@@ -27,21 +27,58 @@ enum class WidgetFormat(
     val baseWidth: Float,
     val baseHeight: Float,
     val radius: Float,
+    /** Plus petite hauteur de maquette, en dp, où le dessin tient encore sans rien superposer. */
+    private val minSceneHeight: Float,
 ) {
-    PASTILLE(84f, 92f, 22f),
-    UN_SENS(172f, 92f, 24f),
-    GRAND_CHIFFRE(172f, 192f, 28f),
-    FRISE(348f, 92f, 28f),
-    COMPACT(348f, 92f, 28f),
-    DEUX_SENS(172f, 192f, 28f),
-    TRAIN(172f, 192f, 28f),
-    DEUX_SENS_LARGE(348f, 192f, 28f),
-    LISTE(348f, 192f, 28f),
-    PROXIMITE(348f, 192f, 28f);
+    PASTILLE(84f, 92f, 22f, 92f),
+    UN_SENS(172f, 92f, 24f, 86f),
+    GRAND_CHIFFRE(172f, 192f, 28f, 186f),
+    FRISE(348f, 92f, 28f, 92f),
+    COMPACT(348f, 92f, 28f, 76f),
+    DEUX_SENS(172f, 192f, 28f, 192f),
+    TRAIN(172f, 192f, 28f, 170f),
+    DEUX_SENS_LARGE(348f, 192f, 28f, 184f),
+    LISTE(348f, 192f, 28f, 146f),
+    PROXIMITE(348f, 192f, 28f, 122f);
 
-    /** Échelle du dessin : le format s'agrandit avec le widget, dans des limites lisibles. */
-    fun sceneScale(widthDp: Float, heightDp: Float): Float =
-        min(widthDp / baseWidth, heightDp / baseHeight).coerceIn(MIN_SCALE, MAX_SCALE)
+    /**
+     * Échelle du dessin : le format s'agrandit avec le widget, dans des limites lisibles. Quand la
+     * hauteur manque, il rétrécit encore plutôt que de déborder ; en largeur, les textes se coupent
+     * d'eux-mêmes.
+     */
+    fun sceneScale(widthDp: Float, heightDp: Float): Float {
+        val readable = min(widthDp / baseWidth, heightDp / baseHeight).coerceIn(MIN_SCALE, MAX_SCALE)
+        return min(readable, heightDp / minSceneHeight).coerceAtLeast(FLOOR_SCALE)
+    }
+
+    /**
+     * Le format à dessiner dans cette taille : lui-même ou, quand la hauteur ne lui suffit pas, son
+     * équivalent sur une rangée, celui que l'entrée automatique choisirait. C'est le cas d'un widget
+     * rétréci à une rangée, et de l'écran d'accueil en paysage, où deux rangées sont moins hautes
+     * qu'une seule en portrait.
+     */
+    fun fitting(widthDp: Float, heightDp: Float, singleDirection: Boolean): WidgetFormat {
+        if (heightDp / minSceneHeight >= smallestScale) return this
+        val wide = widthDp >= WIDE_FROM
+        return when (this) {
+            GRAND_CHIFFRE, TRAIN -> if (wide) FRISE else UN_SENS
+            DEUX_SENS, DEUX_SENS_LARGE -> if (wide) COMPACT else UN_SENS
+            LISTE -> when {
+                !wide -> UN_SENS
+                singleDirection -> FRISE
+                else -> COMPACT
+            }
+            // Déjà sur une rangée, ou réglant lui-même son nombre de lignes.
+            PASTILLE, UN_SENS, FRISE, COMPACT, PROXIMITE -> this
+        }
+    }
+
+    /**
+     * Échelle en dessous de laquelle le format cède sa place. La voie et la liste des départs n'ont
+     * pas d'équivalent sur une rangée : ces deux formats rétrécissent davantage avant de céder.
+     */
+    private val smallestScale: Float
+        get() = if (this == TRAIN || this == LISTE) REDUCED_SCALE else MIN_SCALE
 
     /** Vrai pour les formats pensés pour afficher les deux sens. */
     val showsBothDirections: Boolean
@@ -54,6 +91,12 @@ enum class WidgetFormat(
     companion object {
         private const val MIN_SCALE = 0.75f
         private const val MAX_SCALE = 1.6f
+
+        /** Échelle acceptée, faute de mieux, par les formats sans équivalent sur une rangée. */
+        private const val REDUCED_SCALE = 0.6f
+
+        /** En dessous, plus rien n'est lisible : le dessin ne rétrécit pas davantage. */
+        private const val FLOOR_SCALE = 0.5f
         private const val NARROW_BELOW = 130f
         private const val WIDE_FROM = 250f
         private const val TALL_FROM = 150f
@@ -78,6 +121,47 @@ enum class WidgetFormat(
                 rail || singleDirection || heightDp >= VERY_TALL_FROM -> LISTE
                 else -> DEUX_SENS_LARGE
             }
+        }
+    }
+}
+
+/** Taille d'un widget, en dp. */
+data class WidgetSize(val width: Float, val height: Float)
+
+/**
+ * Les deux tailles qu'un lanceur donne à un widget : en portrait et en paysage.
+ *
+ * Le widget ne sait pas dans quel sens son lanceur est tourné : l'orientation que voit
+ * l'application est celle de l'écran, donc de l'application au premier plan, pas celle de l'écran
+ * d'accueil. Il lui envoie les deux dessins, et le lanceur prend celui de sa propre orientation.
+ */
+data class WidgetSizes(val portrait: WidgetSize, val landscape: WidgetSize) {
+
+    /** La taille en paysage, quand elle diffère de celle en portrait. */
+    val otherLandscape: WidgetSize? get() = landscape.takeIf { it != portrait }
+
+    companion object {
+        const val DEFAULT_WIDTH_DP = 348f
+        const val DEFAULT_HEIGHT_DP = 192f
+
+        /**
+         * À partir des options du widget (AppWidgetManager.OPTION_APPWIDGET_…) : la largeur minimale
+         * et la hauteur maximale sont celles du portrait, les deux autres celles du paysage. Une
+         * valeur absente est remplacée par celle de l'autre orientation, puis par la maquette.
+         */
+        fun of(minWidth: Int, maxWidth: Int, minHeight: Int, maxHeight: Int): WidgetSizes {
+            fun pick(wanted: Int, other: Int, default: Float): Float =
+                (if (wanted > 0) wanted else other).takeIf { it > 0 }?.toFloat() ?: default
+            return WidgetSizes(
+                portrait = WidgetSize(
+                    pick(minWidth, maxWidth, DEFAULT_WIDTH_DP),
+                    pick(maxHeight, minHeight, DEFAULT_HEIGHT_DP),
+                ),
+                landscape = WidgetSize(
+                    pick(maxWidth, minWidth, DEFAULT_WIDTH_DP),
+                    pick(minHeight, maxHeight, DEFAULT_HEIGHT_DP),
+                ),
+            )
         }
     }
 }
@@ -459,7 +543,9 @@ object WidgetModels {
     ): WidgetModel {
         val line = config?.line
         val rail = line?.mode == "rail"
-        val format = fixedFormat ?: WidgetFormat.select(widthDp, heightDp, rail, config?.isSingleDirection ?: true)
+        val singleDirection = config?.isSingleDirection ?: true
+        val format = (fixedFormat ?: WidgetFormat.select(widthDp, heightDp, rail, singleDirection))
+            .fitting(widthDp, heightDp, singleDirection)
         val palette = Palettes.resolve(config?.theme ?: WidgetTheme.AUTO, format, line, night)
 
         val upcoming = if (config != null && state != null) Directions.upcoming(state.departures, now) else emptyList()

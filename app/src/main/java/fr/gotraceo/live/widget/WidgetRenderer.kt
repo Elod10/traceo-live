@@ -26,10 +26,11 @@ class WidgetPreview(val bitmap: Bitmap, val description: String)
 /** Construit les RemoteViews d'un widget à partir de sa configuration et de son dernier état. */
 object WidgetRenderer {
 
-    private const val DEFAULT_WIDTH_DP = 348f
-    private const val DEFAULT_HEIGHT_DP = 192f
-
     /**
+     * Le widget dans ses deux tailles, portrait et paysage, quand elles diffèrent : le lanceur affiche
+     * celle de sa propre orientation. Dessiner d'après l'orientation vue par l'application donnait
+     * au lanceur, resté en portrait, l'image du paysage dès qu'une autre application avait tourné l'écran.
+     *
      * @param fixedFormat format choisi dans la liste des widgets, ou null pour l'adapter à la taille
      * @param renderScale réduit la définition de l'image si elle est trop lourde pour le lanceur
      */
@@ -47,25 +48,32 @@ object WidgetRenderer {
         auto: AutoState? = null,
         proximity: ProximityState? = null,
     ): RemoteViews {
-        val (width, height) = widgetSize(context, options)
         val isAuto = config?.auto == true
         // Sans position exacte, le toucher mène à la configuration, qui la redemande.
         val canLocate = isAuto && PositionReader(context).hasPreciseAccess
-        val model = model(context, config, state, hasApiKey, refreshing, width, height, now, fixedFormat, auto, proximity)
         val density = context.resources.displayMetrics.density * renderScale
 
-        val views = RemoteViews(context.packageName, R.layout.widget_canvas)
-        views.setImageViewBitmap(R.id.widget_image, WidgetPainter.paint(context, model, width, height, density))
-        views.setContentDescription(R.id.widget_image, describe(context, model))
-        val needsConfiguration = model.notice?.kind == NoticeKind.NOT_CONFIGURED || model.notice?.kind == NoticeKind.RECONFIGURE
-        val click = when {
-            needsConfiguration || (isAuto && !canLocate) -> configurePendingIntent(context, widgetId)
-            isAuto && auto?.isChoiceOpen(now) == true -> choicePendingIntent(context, widgetId)
-            isAuto -> locatePendingIntent(context, widgetId)
-            else -> refreshPendingIntent(context, widgetId)
+        fun viewsFor(size: WidgetSize): RemoteViews {
+            val (width, height) = size
+            val model = model(context, config, state, hasApiKey, refreshing, width, height, now, fixedFormat, auto, proximity)
+            val views = RemoteViews(context.packageName, R.layout.widget_canvas)
+            views.setImageViewBitmap(R.id.widget_image, WidgetPainter.paint(context, model, width, height, density))
+            views.setContentDescription(R.id.widget_image, describe(context, model))
+            val needsConfiguration = model.notice?.kind == NoticeKind.NOT_CONFIGURED || model.notice?.kind == NoticeKind.RECONFIGURE
+            val click = when {
+                needsConfiguration || (isAuto && !canLocate) -> configurePendingIntent(context, widgetId)
+                isAuto && auto?.isChoiceOpen(now) == true -> choicePendingIntent(context, widgetId)
+                isAuto -> locatePendingIntent(context, widgetId)
+                else -> refreshPendingIntent(context, widgetId)
+            }
+            views.setOnClickPendingIntent(R.id.widget_root, click)
+            return views
         }
-        views.setOnClickPendingIntent(R.id.widget_root, click)
-        return views
+
+        val sizes = widgetSizes(options)
+        val portrait = viewsFor(sizes.portrait)
+        val landscape = sizes.otherLandscape?.let(::viewsFor) ?: return portrait
+        return RemoteViews(landscape, portrait)
     }
 
     /** Le widget tel qu'il apparaît sur l'écran d'accueil, pour l'accueil et la configuration. */
@@ -150,19 +158,23 @@ object WidgetRenderer {
     private fun isNight(context: Context): Boolean =
         context.resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK == Configuration.UI_MODE_NIGHT_YES
 
-    /** Taille actuelle du widget en dp, selon l'orientation de l'écran. */
+    /** Les tailles du widget en dp, en portrait et en paysage, d'après ce que le lanceur en dit. */
+    fun widgetSizes(options: Bundle?): WidgetSizes = WidgetSizes.of(
+        minWidth = options?.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 0) ?: 0,
+        maxWidth = options?.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_WIDTH, 0) ?: 0,
+        minHeight = options?.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 0) ?: 0,
+        maxHeight = options?.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, 0) ?: 0,
+    )
+
+    /**
+     * Taille du widget en dp dans l'orientation de cet écran, pour les aperçus de l'application.
+     * L'orientation est celle de [context] : seul un écran de l'application connaît la sienne.
+     */
     fun widgetSize(context: Context, options: Bundle?): Pair<Float, Float> {
-        val minWidth = options?.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 0) ?: 0
-        val maxWidth = options?.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_WIDTH, 0) ?: 0
-        val minHeight = options?.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_HEIGHT, 0) ?: 0
-        val maxHeight = options?.getInt(AppWidgetManager.OPTION_APPWIDGET_MAX_HEIGHT, 0) ?: 0
+        val sizes = widgetSizes(options)
         val landscape = context.resources.configuration.orientation == Configuration.ORIENTATION_LANDSCAPE
-        val width = if (landscape) maxWidth else minWidth
-        val height = if (landscape) minHeight else maxHeight
-        return Pair(
-            (if (width > 0) width else maxOf(minWidth, maxWidth)).takeIf { it > 0 }?.toFloat() ?: DEFAULT_WIDTH_DP,
-            (if (height > 0) height else maxOf(minHeight, maxHeight)).takeIf { it > 0 }?.toFloat() ?: DEFAULT_HEIGHT_DP,
-        )
+        val size = if (landscape) sizes.landscape else sizes.portrait
+        return size.width to size.height
     }
 
     /** Taille d'un aperçu : celle du widget si le lanceur l'a donnée, sinon celle de son format. */

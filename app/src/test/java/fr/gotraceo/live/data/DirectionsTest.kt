@@ -108,6 +108,20 @@ class DirectionsTest {
     }
 
     @Test
+    fun aVehicleAtTheStopStaysALittleAfterItsTimeButNotForever() {
+        fun atStop(destination: String, inMinutes: Int) = dep("a", destination, inMinutes).copy(atStop = true)
+        // À quai depuis une minute et demie : encore là, alors qu'un passage ordinaire serait retiré.
+        assertEquals(listOf("Quai"), Directions.upcoming(listOf(atStop("Quai", 0).shifted(-90_000L)), now).map { it.destination })
+        assertTrue(Directions.upcoming(listOf(dep("a", "Parti", 0).shifted(-90_000L)), now).isEmpty())
+        // Sans nouvelle de la source (hors connexion, actualisation manuelle), il a fini par partir :
+        // le suivant prend sa place au lieu de rester derrière un « à quai » qui ne bouge plus.
+        val stale = listOf(atStop("Parti", -3), dep("a", "Suivant", 4))
+        assertEquals(listOf("Suivant"), Directions.upcoming(stale, now).map { it.destination })
+    }
+
+    private fun Departure.shifted(byMs: Long) = copy(expectedArrival = expectedArrival?.plus(byMs))
+
+    @Test
     fun filterAcceptsADestinationWhenPrimReturnsAnotherDirectionName() {
         val zone = "stop_area:IDFM:71348"
         // Widget configuré sans clé : la clé de sens est la destination vue par Tracéo.
