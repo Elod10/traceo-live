@@ -64,7 +64,7 @@ object AutoMode {
         return NearbyRules.rank(
             candidates = NearbyRules.linesAround(area, point),
             favorites = prefs.favoriteLines,
-            pickedLineId = prefs.placeChoices.lineAt(point),
+            pickedLineKey = prefs.placeChoices.lineAt(point),
             nightService = NearbyRules.isNightService(paris.get(Calendar.HOUR_OF_DAY), paris.get(Calendar.MINUTE)),
             modes = DataSources.modes(prefs.hasApiKey).flatMap { it.apiModes }.toSet(),
         )
@@ -95,7 +95,7 @@ object AutoMode {
     ) {
         val prefs = Prefs(context)
         if (changedByUser) {
-            prefs.placeChoices = prefs.placeChoices.remember(fix.point, nearby.line.id, System.currentTimeMillis())
+            prefs.placeChoices = prefs.placeChoices.remember(fix.point, nearby.line.key, System.currentTimeMillis())
         }
         prefs.saveConfig(configFor(widgetId, nearby, theme))
         prefs.saveAuto(widgetId, AutoState(anchor = fix.point, last = fix.point, distanceM = nearby.distanceM))
@@ -342,7 +342,7 @@ object AutoMode {
         val prefs = Prefs(app)
         val config = prefs.config(widgetId) ?: return
         val now = System.currentTimeMillis()
-        prefs.auto(widgetId).last?.let { prefs.placeChoices = prefs.placeChoices.remember(it, nearby.line.id, now) }
+        prefs.auto(widgetId).last?.let { prefs.placeChoices = prefs.placeChoices.remember(it, nearby.line.key, now) }
         if (WidgetProviders.isProximity(app, widgetId)) {
             // La ligne choisie passe en tête : le classement suffit à la placer.
             val current = prefs.auto(widgetId)
