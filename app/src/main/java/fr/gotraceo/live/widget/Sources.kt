@@ -3,22 +3,46 @@ package fr.gotraceo.live.widget
 import android.content.Context
 import fr.gotraceo.live.data.DataSources
 import fr.gotraceo.live.data.NearbyLine
+import fr.gotraceo.live.data.NetworkCatalogStore
+import fr.gotraceo.live.data.Networks
 import fr.gotraceo.live.data.PassageSnapshot
 import fr.gotraceo.live.data.PassageSource
 import fr.gotraceo.live.data.Prefs
+import java.io.File
 
 /**
- * Sources de passages de l'application : la clé, son quota du jour et le repli sur Tracéo, et le
- * `nextAt` de Tracéo retenu pour caler les actualisations suivantes.
+ * Sources de passages de l'application : pour l'Île-de-France, la clé, son quota du jour et le repli
+ * sur Tracéo ; pour un autre réseau, le cache de Tracéo. Le `nextAt` de Tracéo est retenu réseau par
+ * réseau, pour caler les actualisations suivantes.
  */
 object Sources {
 
-    fun passages(context: Context): PassageSource {
+    private const val CATALOG_FILE = "networks.json"
+
+    /** Le catalogue des réseaux gardé sur le téléphone. */
+    fun catalog(context: Context): NetworkCatalogStore =
+        NetworkCatalogStore(File(context.applicationContext.noBackupFilesDir, CATALOG_FILE))
+
+    /**
+     * Réseaux dont l'application montre des données : ceux des widgets configurés, l'Île-de-France
+     * en tête. C'est d'eux que les écrans citent la source et la licence.
+     */
+    fun usedNetworks(context: Context): List<String> {
         val prefs = Prefs(context)
-        val base = DataSources.passageSource(
-            prefs.apiKey, prefs.primFormats, QuotaAlerts.listener(context), prefs.primPaused,
+        val ids = WidgetUpdater.widgetIds(context).asList().mapNotNull { prefs.config(it)?.networkId }.distinct()
+        return ids.sortedBy { if (Networks.isIdfm(it)) 0 else 1 }
+    }
+
+    /** Nom d'un réseau hors Île-de-France d'après le catalogue du téléphone, pour le citer comme source. */
+    fun networkName(context: Context, networkId: String?): String? =
+        networkId?.takeUnless(Networks::isIdfm)?.let { catalog(context).read().byId(it)?.name }
+
+    fun passages(context: Context, networkId: String): PassageSource {
+        val prefs = Prefs(context)
+        val base = DataSources.networkSource(
+            networkId, prefs.apiKey, prefs.primFormats, QuotaAlerts.listener(context), prefs.primPaused,
         )
-        return PassageSource { stopId, lineId -> base.passages(stopId, lineId).also { note(prefs, it) } }
+        return PassageSource { stopId, lineId -> base.passages(stopId, lineId).also { note(prefs, networkId, it) } }
     }
 
     fun proximity(context: Context): (NearbyLine) -> Result<PassageSnapshot> {
@@ -26,13 +50,15 @@ object Sources {
         val base = DataSources.proximitySource(
             prefs.apiKey, prefs.primFormats, QuotaAlerts.listener(context), prefs.primPaused,
         )
-        return { nearby -> base(nearby).also { result -> result.getOrNull()?.let { note(prefs, it) } } }
+        return { nearby ->
+            base(nearby).also { result -> result.getOrNull()?.let { note(prefs, nearby.line.networkId, it) } }
+        }
     }
 
-    /** Retient l'heure du prochain relevé de Tracéo ; sans annonce (collecte suspendue), l'oublie. */
-    private fun note(prefs: Prefs, snapshot: PassageSnapshot) {
+    /** Retient l'heure du prochain relevé du réseau chez Tracéo ; sans annonce (collecte suspendue), l'oublie. */
+    private fun note(prefs: Prefs, networkId: String, snapshot: PassageSnapshot) {
         if (!snapshot.viaTraceo) return
         val next = snapshot.nextAt ?: 0L
-        if (next != prefs.traceoNextAt) prefs.traceoNextAt = next
+        if (next != prefs.traceoNextAt(networkId)) prefs.setTraceoNextAt(networkId, next)
     }
 }

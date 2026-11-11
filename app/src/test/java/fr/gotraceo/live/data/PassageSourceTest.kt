@@ -100,8 +100,8 @@ class PassageSourceTest {
     @Test
     fun cableAndFunicularOnlyWithKey() {
         assertFalse(TransportMode.OTHER in DataSources.modes(hasKey = false))
-        assertEquals(TransportMode.entries.size - 1, DataSources.modes(hasKey = false).size)
-        assertEquals(TransportMode.entries, DataSources.modes(hasKey = true))
+        assertEquals(TransportMode.IDFM.size - 1, DataSources.modes(hasKey = false).size)
+        assertEquals(TransportMode.IDFM, DataSources.modes(hasKey = true))
     }
 
     @Test

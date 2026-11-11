@@ -762,7 +762,8 @@ private class Scene(
             return
         }
         val iconWidth = when (notice.kind) {
-            NoticeKind.NOT_CONFIGURED -> {
+            // Hors réseau, la pastille serait celle d'une ligne d'une autre ville.
+            NoticeKind.NOT_CONFIGURED, NoticeKind.NO_NETWORK -> {
                 stroke.color = p.text3
                 stroke.strokeWidth = 1.5f
                 stroke.pathEffect = DashPathEffect(floatArrayOf(3f, 3f), 0f)
@@ -782,6 +783,7 @@ private class Scene(
             small -> null
             notice.kind == NoticeKind.NOT_CONFIGURED -> context.getString(R.string.widget_not_configured)
             notice.kind == NoticeKind.RECONFIGURE -> context.getString(R.string.widget_reconfigure_title)
+            notice.kind == NoticeKind.NO_NETWORK -> context.getString(R.string.widget_no_network_title)
             else -> model.stopName
         }
         if (title != null) {
@@ -792,7 +794,13 @@ private class Scene(
         val body = when (notice.kind) {
             NoticeKind.NOT_CONFIGURED -> if (small) R.string.widget_short_not_configured else R.string.widget_tap_to_configure
             NoticeKind.RECONFIGURE -> if (small) R.string.widget_short_reconfigure else R.string.widget_reconfigure_body
-            NoticeKind.NO_DEPARTURE -> if (small) R.string.widget_short_no_departure else R.string.widget_no_departure
+            NoticeKind.NO_NETWORK -> if (small) R.string.widget_short_no_network else R.string.widget_no_network_body
+            NoticeKind.NO_DEPARTURE -> when {
+                small -> R.string.widget_short_no_departure
+                // La raison est connue (ligne sans temps réel) : elle remplace le message habituel.
+                notice.detail != null -> null
+                else -> R.string.widget_no_departure
+            }
             else -> if (small) R.string.widget_short_error else null
         }?.let { context.getString(it) } ?: notice.detail.orEmpty()
         val size = if (small) 12.5f else 14.5f

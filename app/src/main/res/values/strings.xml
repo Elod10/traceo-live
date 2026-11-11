@@ -34,6 +34,9 @@
     <string name="widget_loading">Chargement…</string>
     <string name="widget_no_departure">Aucun passage prévu pour le moment</string>
     <string name="widget_stale">Actualisation impossible</string>
+    <string name="widget_no_network_title">Aucun réseau ici</string>
+    <string name="widget_no_network_body">Aucun arrêt des réseaux couverts n\'est à portée. Touchez pour relire votre position.</string>
+    <string name="widget_short_no_network">Hors réseau</string>
     <string name="widget_short_not_configured">Non configuré</string>
     <string name="widget_short_reconfigure">À reconfigurer</string>
     <string name="widget_short_no_departure">Aucun passage</string>
@@ -60,6 +63,7 @@
     <string name="main_status_snapshot">Relevé de %1$s</string>
     <string name="main_status_snapshot_old">Relevé ancien de %1$s</string>
     <string name="main_status_updated">Mis à jour à %1$s</string>
+    <string name="main_widget_title_network">%1$s · %2$s</string>
 
     <!-- Galerie des formats -->
     <string name="gallery_position">Selon ma position</string>
@@ -75,12 +79,14 @@
     <string name="main_source_traceo_detail">Sans clé : le relevé change environ toutes les 2 minutes et la voie n\'est pas disponible.</string>
     <string name="main_source_prim">PRIM en direct</string>
     <string name="main_source_prim_detail">Clé enregistrée : les widgets affichent la voie quand elle est connue et peuvent s\'actualiser chaque minute.</string>
+    <string name="settings_source_networks">%1$s : toujours par le cache de Tracéo, à la cadence de chaque réseau. La clé PRIM ne concerne que l\'Île-de-France.</string>
     <string name="settings_key_add">Ajouter une clé API PRIM</string>
     <string name="settings_key_edit">Clé API PRIM</string>
     <string name="settings_key_add_sub">Facultatif : la voie, le câble et le funiculaire</string>
     <string name="main_refresh_title">Actualisation automatique</string>
     <string name="main_refresh_help">Seulement quand l\'écran est allumé. Touchez un widget pour l\'actualiser tout de suite. Sans clé, l\'intervalle le plus court est de 2 minutes : le cache de Tracéo ne change pas plus vite.</string>
     <string name="main_refresh_help_key">Seulement quand l\'écran est allumé. Touchez un widget pour l\'actualiser tout de suite. Chaque actualisation consomme une requête par point d\'arrêt sur votre quota PRIM.</string>
+    <string name="main_refresh_help_networks">Seulement quand l\'écran est allumé. Touchez un widget pour l\'actualiser tout de suite. Chaque réseau a sa cadence : en Île-de-France sans clé, le relevé ne change que toutes les 2 minutes, même si vous choisissez « Chaque minute ».</string>
     <string name="refresh_manual">Manuelle uniquement (toucher le widget)</string>
     <string name="refresh_every_minute">Chaque minute</string>
     <string name="refresh_every_n">Toutes les %1$d minutes</string>
@@ -137,6 +143,8 @@
 
     <!-- Sources et licences -->
     <string name="sources_not_affiliated">Cette application n\'est pas affiliée à Île-de-France Mobilités.</string>
+    <string name="sources_not_affiliated_networks">Cette application n\'est affiliée ni à Île-de-France Mobilités, ni aux réseaux dont elle affiche les données : %1$s.</string>
+    <string name="sources_networks_title">Autres réseaux</string>
     <string name="main_about_traceo">Données © Île-de-France Mobilités, via <a href="https://gotraceo.fr">Tracéo (gotraceo.fr)</a> : Tracéo interroge l\'API PRIM et met ses réponses en cache.\n\nContient des informations de <a href="https://prim.iledefrance-mobilites.fr/">PRIM</a> (Île-de-France Mobilités), présentement mises à disposition aux conditions de la <a href="https://cloud.fabmob.io/s/eYWWJBdM3fQiFNm">Licence Mobilités</a> et de l\'<a href="https://opendatacommons.org/licenses/odbl/1-0/">Open Database License (ODbL)</a>.\n\nArrêts proches du mode automatique : contient des informations d\'<a href="https://data.iledefrance-mobilites.fr/explore/dataset/arrets-lignes/">Arrêts et lignes associées</a> (attributions : INSEE, IGN, NaturalEarth, DGCL - BANATIC, MEFR, MAA) et du <a href="https://data.iledefrance-mobilites.fr/explore/dataset/referentiel-des-lignes/">Référentiel des lignes</a>, présentement mises à disposition aux conditions de l\'<a href="https://opendatacommons.org/licenses/odbl/1-0/">Open Database License (ODbL)</a>.\n\nRegroupement des arrêts proches : Île-de-France Mobilités, <a href="https://data.iledefrance-mobilites.fr/explore/dataset/arrets/">Arrêts</a> et <a href="https://data.iledefrance-mobilites.fr/explore/dataset/zones-d-arrets/">Zones d\'arrêts</a>, données originales téléchargées sur data.iledefrance-mobilites.fr, sous <a href="https://www.etalab.gouv.fr/licence-ouverte-open-licence">Licence Ouverte 2.0</a>.</string>
     <string name="main_about_prim">Données © Île-de-France Mobilités. Avec votre clé, le téléphone interroge directement PRIM.\n\nPassages : contient des informations de <a href="https://prim.iledefrance-mobilites.fr/fr/apis/idfm-ivtr-requete_unitaire">Prochains passages (PRIM)</a>, présentement mises à disposition aux conditions de la <a href="https://cloud.fabmob.io/s/eYWWJBdM3fQiFNm">Licence Mobilités</a> et de l\'<a href="https://opendatacommons.org/licenses/odbl/1-0/">Open Database License (ODbL)</a>.\n\nLignes et arrêts : contient des informations de <a href="https://data.iledefrance-mobilites.fr/explore/dataset/referentiel-des-lignes/">Référentiel des lignes</a> et d\'<a href="https://data.iledefrance-mobilites.fr/explore/dataset/arrets-lignes/">Arrêts et lignes associées</a> (attributions : INSEE, IGN, NaturalEarth, DGCL - BANATIC, MEFR, MAA), présentement mises à disposition aux conditions de l\'<a href="https://opendatacommons.org/licenses/odbl/1-0/">Open Database License (ODbL)</a>.\n\nRegroupement des arrêts proches : Île-de-France Mobilités, <a href="https://data.iledefrance-mobilites.fr/explore/dataset/arrets/">Arrêts</a> et <a href="https://data.iledefrance-mobilites.fr/explore/dataset/zones-d-arrets/">Zones d\'arrêts</a>, données originales téléchargées sur data.iledefrance-mobilites.fr, sous <a href="https://www.etalab.gouv.fr/licence-ouverte-open-licence">Licence Ouverte 2.0</a>.\n\nSans clé, l\'application passe par le cache de <a href="https://gotraceo.fr">Tracéo (gotraceo.fr)</a>, qui interroge PRIM.</string>
     <string name="sources_index_date">Dernière mise à jour de l\'index des arrêts sur ce téléphone : %1$s.</string>
@@ -151,8 +159,24 @@
     <string name="step_line">Ligne</string>
     <string name="step_stop">Arrêt</string>
     <string name="step_direction">Sens et couleur</string>
-    <string name="step_count">%1$d/4</string>
-    <string name="step_counter">Étape %1$d/4 · %2$s</string>
+    <string name="step_network">Réseau</string>
+    <string name="step_count">%1$d/%2$d</string>
+    <string name="step_counter">Étape %1$d/%2$d · %3$s</string>
+    <string name="network_help">Choisissez le réseau de ce widget. D\'autres villes s\'ajouteront à cette liste.</string>
+    <string name="network_loading">Recherche des autres réseaux…</string>
+    <string name="network_unavailable">Les autres réseaux n\'ont pas pu être chargés : vérifiez la connexion, puis revenez à cette étape.</string>
+    <string name="network_find">Trouver mon réseau</string>
+    <string name="network_find_sub">Avec votre position approximative : elle sert seulement à reconnaître votre ville, sur ce téléphone.</string>
+    <string name="network_position_denied">Sans accès à la position, choisissez votre réseau dans la liste.</string>
+    <string name="network_position_unknown">Position introuvable : choisissez votre réseau dans la liste.</string>
+    <string name="network_none_near">Aucun de ces réseaux ne dessert l\'endroit où vous êtes. Vous pouvez tout de même en choisir un pour un autre lieu.</string>
+    <string name="network_reason_current">Réseau de ce widget</string>
+    <string name="network_reason_nearest">Le plus proche de vous</string>
+    <string name="network_reason_last">Dernier réseau choisi</string>
+    <string name="network_off">Indisponible pour le moment</string>
+    <string name="network_stale">Temps réel interrompu pour le moment</string>
+    <string name="line_no_realtime">Sans temps réel</string>
+    <string name="direction_no_realtime">Cette ligne n\'a pas de temps réel : le widget ne pourra pas afficher ses passages.</string>
     <string name="search_line_hint">Rechercher une ligne (numéro, nom, réseau…)</string>
     <string name="search_stop_hint">Rechercher un arrêt ou une commune</string>
     <string name="search_stop_hint_no_town">Rechercher un arrêt</string>
@@ -202,14 +226,17 @@
     <string name="auto_error_permission">Sans accès à la position, le mode automatique ne peut pas trouver les arrêts proches. Vous pouvez l\'autoriser dans les réglages de l\'application. Elle n\'est lue qu\'au toucher du widget et n\'est envoyée à personne.</string>
     <string name="auto_error_precise">Le mode automatique a besoin de la position exacte : la position approximative peut se tromper de plusieurs kilomètres. Vous pouvez l\'activer dans les réglages de l\'application.</string>
     <string name="auto_error_position">Position introuvable. Vérifiez que la localisation est activée, puis réessayez.</string>
-    <string name="auto_error_index">Impossible de télécharger la liste des arrêts.\n%1$s</string>
-    <string name="auto_error_no_stop">Aucun arrêt à moins de 2 km. Le mode automatique ne couvre que l\'Île-de-France.</string>
+    <string name="auto_loading_index_network">Téléchargement des arrêts de %1$s…</string>
+    <string name="auto_error_index">Impossible de télécharger la liste des arrêts (%1$s). Vérifiez la connexion, puis réessayez.</string>
+    <string name="auto_error_no_stop">Aucun arrêt à moins de 2 km.</string>
+    <string name="auto_error_no_network">Aucun réseau couvert ne dessert l\'endroit où vous êtes. Réseaux couverts : %1$s.</string>
     <string name="auto_row_detail">%1$s · %2$s</string>
     <string name="auto_notification_channel">Position du widget</string>
     <string name="auto_notification_text">Recherche des arrêts proches…</string>
     <string name="nearby_title">Près de vous</string>
     <string name="nearby_help">Votre choix reste mémorisé pour ce lieu.</string>
     <string name="nearby_empty">Aucune ligne à proposer pour le moment.</string>
+    <string name="nearby_no_network">Aucun réseau couvert ne dessert cet endroit.</string>
     <string name="nearby_shown">Affichée</string>
     <string name="nearby_towards">vers %1$s</string>
     <string name="nearby_unit">min</string>
