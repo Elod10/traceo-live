@@ -5,6 +5,8 @@ import fr.gotraceo.live.data.DataSources
 import fr.gotraceo.live.data.Departure
 import fr.gotraceo.live.data.Directions
 import fr.gotraceo.live.data.Line
+import fr.gotraceo.live.data.NetworkMentions
+import fr.gotraceo.live.data.Networks
 import fr.gotraceo.live.data.PassageRoute
 import fr.gotraceo.live.data.PrimClient
 import fr.gotraceo.live.data.Proximity
@@ -540,6 +542,7 @@ object WidgetModels {
         autoHint: AutoHint? = null,
         autoDistanceM: Int? = null,
         night: Boolean = true,
+        networkName: String? = null,
     ): WidgetModel {
         val line = config?.line
         val rail = line?.mode == "rail"
@@ -552,11 +555,12 @@ object WidgetModels {
         val passages = upcoming.map { WidgetContent.passage(it, now, line?.mode.orEmpty()) }
         val notice = when {
             config == null -> Notice(NoticeKind.NOT_CONFIGURED)
-            DataSources.route(config.stop.stopIds, hasApiKey) == PassageRoute.RECONFIGURE -> Notice(NoticeKind.RECONFIGURE)
+            DataSources.route(config, hasApiKey) == PassageRoute.RECONFIGURE -> Notice(NoticeKind.RECONFIGURE)
             passages.isNotEmpty() -> null
             state == null -> Notice(NoticeKind.LOADING)
             state.error != null -> Notice(NoticeKind.ERROR, state.error)
-            else -> Notice(NoticeKind.NO_DEPARTURE)
+            // Une ligne absente du flux temps réel n'aura jamais de passage : mieux vaut le dire.
+            else -> Notice(NoticeKind.NO_DEPARTURE, NO_REALTIME.takeIf { line?.realtime == false })
         }
         // Un relevé se date à l'heure de la source, pas à celle du téléphone.
         val snapshot = state?.takeIf { it.isSnapshot }
@@ -585,7 +589,7 @@ object WidgetModels {
             refreshing = refreshing,
             notice = notice,
             sourceLabel = if (snapshot != null && !quiet) TraceoClient.SOURCE_NAME else null,
-            sourceDetail = if (snapshot != null && !quiet) TraceoClient.SOURCE_DETAIL else null,
+            sourceDetail = if (snapshot != null && !quiet) snapshotSource(config?.networkId, networkName) else null,
             liveSource = if (snapshot == null && !quiet && shownAt > 0L) PrimClient.SOURCE_NAME else null,
             oldSnapshot = snapshot?.fresh == false && !quiet,
             autoHint = hint?.label,
@@ -594,10 +598,18 @@ object WidgetModels {
     }
 
     /**
+     * Source à citer en toutes lettres à côté de l'heure d'un relevé : les données franciliennes sont
+     * celles de PRIM, celles d'un autre réseau portent son nom.
+     */
+    private fun snapshotSource(networkId: String?, networkName: String?): String =
+        if (networkId == null || Networks.isIdfm(networkId)) TraceoClient.SOURCE_DETAIL else NetworkMentions.sourceDetail(networkName)
+
+    /**
      * Modèle du format À proximité. Sa couleur suit le thème du système, et son contenu vient de
      * plusieurs lignes : il a donc son propre état.
      *
      * @param night vrai si le système est en thème sombre
+     * @param networkName nom du réseau des lignes affichées, hors Île-de-France
      */
     fun buildProximity(
         config: WidgetConfig?,
@@ -608,6 +620,7 @@ object WidgetModels {
         now: Long,
         night: Boolean,
         autoHint: AutoHint? = null,
+        networkName: String? = null,
     ): WidgetModel {
         val format = WidgetFormat.PROXIMITE
         val palette = Palettes.resolve(if (night) WidgetTheme.DARK else WidgetTheme.LIGHT, format, null)
@@ -644,7 +657,12 @@ object WidgetModels {
             refreshing = refreshing,
             notice = notice,
             sourceLabel = if (snapshot != null && !quiet) TraceoClient.SOURCE_NAME else null,
-            sourceDetail = if (snapshot != null && !quiet) TraceoClient.SOURCE_DETAIL else null,
+            sourceDetail = if (snapshot != null && !quiet) {
+                // Le réseau du format est celui de ses lignes, toutes relevées au même endroit.
+                snapshotSource(state?.entries?.firstOrNull()?.nearby?.line?.networkId ?: config?.networkId, networkName)
+            } else {
+                null
+            },
             liveSource = if (snapshot == null && !quiet && shownAt > 0L) PrimClient.SOURCE_NAME else null,
             oldSnapshot = snapshot?.fresh == false && !quiet,
             autoHint = hint?.label,
@@ -662,15 +680,24 @@ object WidgetModels {
             badgeBg = background,
             badgeFg = foreground,
             place = "${entry.nearby.stopName} · ${formatDistance(entry.nearby.distanceM)}",
-            directions = WidgetContent.proximityDirections(passages, line.id, entry.nearby.stopName),
+            // L'ordre réel du RER A ne concerne que l'Île-de-France : ailleurs, le sens publié suffit.
+            directions = WidgetContent.proximityDirections(
+                passages, if (Networks.isIdfm(line.networkId)) line.id else "", entry.nearby.stopName,
+            ),
             line = line,
         )
     }
+
+    /** Message d'un widget dont la ligne n'a pas de temps réel, à la place de « Aucun passage ». */
+    const val NO_REALTIME = "Pas de temps réel sur cette ligne"
 
     private fun badgeOf(line: Line): LineBadge {
         val raw = line.shortName.trim().ifEmpty { line.name.trim() }
         val label = (if (line.isRer()) raw.removePrefix("RER").trim().ifEmpty { raw } else raw).take(7)
         val shape = when {
+            // Hors Île-de-France, une même pastille pour tous les modes : le rond du métro et les
+            // filets du tram sont le code de formes francilien.
+            !Networks.isIdfm(line.networkId) -> BadgeShape.BUS
             line.mode == "metro" || line.isRer() -> BadgeShape.CIRCLE
             line.mode == "rail" -> BadgeShape.SQUARE
             line.mode == "tram" -> BadgeShape.TRAM

@@ -115,13 +115,18 @@ object WidgetRenderer {
             else -> auto?.hint(now)
         }
         return if (fixedFormat == WidgetFormat.PROXIMITE) {
-            WidgetModels.buildProximity(config, proximity, refreshing, widthDp, heightDp, now, night, hint)
+            val networkId = proximity?.entries?.firstOrNull()?.nearby?.line?.networkId ?: config?.networkId
+            WidgetModels.buildProximity(
+                config, proximity, refreshing, widthDp, heightDp, now, night, hint,
+                networkName = Sources.networkName(context, networkId),
+            )
         } else {
             WidgetModels.build(
                 config, state, hasApiKey, refreshing, widthDp, heightDp, now, fixedFormat,
                 autoHint = hint,
                 autoDistanceM = auto?.distanceM.takeIf { isAuto },
                 night = night,
+                networkName = Sources.networkName(context, config?.networkId),
             )
         }
     }
@@ -192,7 +197,8 @@ object WidgetRenderer {
             NoticeKind.RECONFIGURE ->
                 context.getString(R.string.widget_reconfigure_title) + ". " + context.getString(R.string.widget_reconfigure_body)
             NoticeKind.LOADING -> context.getString(R.string.widget_loading)
-            NoticeKind.NO_DEPARTURE -> model.stopName + ". " + context.getString(R.string.widget_no_departure)
+            NoticeKind.NO_DEPARTURE ->
+                model.stopName + ". " + (notice.detail ?: context.getString(R.string.widget_no_departure))
             NoticeKind.ERROR -> model.stopName + ". " + notice.detail.orEmpty()
         }
     }

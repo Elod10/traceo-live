@@ -13,7 +13,9 @@ import java.io.IOException
  * retélécharger les listes à chaque configuration. En cas d'erreur réseau, le cache
  * périmé est utilisé s'il existe.
  *
- * Les données viennent de Tracéo sans clé, de l'open data IDFM avec une clé.
+ * En Île-de-France, les données viennent de Tracéo sans clé, de l'open data IDFM avec une clé. Pour
+ * un autre réseau, toujours de Tracéo, et elles sont redemandées quand le catalogue annonce de
+ * nouveaux horaires ([Network.indexAt]).
  */
 class ReferentialRepository(context: Context) {
 
@@ -21,18 +23,41 @@ class ReferentialRepository(context: Context) {
     private val prefs = Prefs(context)
     private val traceo = TraceoClient()
 
-    suspend fun lines(mode: TransportMode, forceRefresh: Boolean = false): List<Line> = withContext(Dispatchers.IO) {
-        val hasKey = prefs.hasApiKey
-        val all = cached(DataSources.linesCacheName(mode, hasKey), forceRefresh, Line::fromJson, Line::toJson) {
-            if (hasKey) Referential.downloadLines(mode.apiModes) else traceo.lines()
+    suspend fun lines(
+        mode: TransportMode,
+        forceRefresh: Boolean = false,
+        network: Network = Networks.ILE_DE_FRANCE,
+    ): List<Line> = withContext(Dispatchers.IO) {
+        val all = if (network.isIdfm) {
+            val hasKey = prefs.hasApiKey
+            cached(DataSources.linesCacheName(mode, hasKey), forceRefresh, Line::fromJson, Line::toJson) {
+                if (hasKey) Referential.downloadLines(mode.apiModes) else traceo.lines()
+            }
+        } else {
+            // Tracéo sert toutes les lignes du réseau d'un coup : un seul fichier, filtré ensuite par mode.
+            cached(
+                DataSources.networkLinesCacheName(network.id), forceRefresh, Line::fromJson, Line::toJson,
+                notBefore = network.indexAt ?: 0L,
+            ) { traceo.lines(network.id) }
         }
         all.filter { mode.includes(it) }
     }
 
-    suspend fun stops(lineId: String, forceRefresh: Boolean = false): List<Stop> = withContext(Dispatchers.IO) {
-        val hasKey = prefs.hasApiKey
-        cached(DataSources.stopsCacheName(lineId, hasKey), forceRefresh, Stop::fromJson, Stop::toJson) {
-            if (hasKey) Referential.downloadStops(lineId) else traceo.stops(lineId)
+    suspend fun stops(
+        line: Line,
+        forceRefresh: Boolean = false,
+        network: Network = Networks.ILE_DE_FRANCE,
+    ): List<Stop> = withContext(Dispatchers.IO) {
+        if (Networks.isIdfm(line.networkId)) {
+            val hasKey = prefs.hasApiKey
+            cached(DataSources.stopsCacheName(line.id, hasKey), forceRefresh, Stop::fromJson, Stop::toJson) {
+                if (hasKey) Referential.downloadStops(line.id) else traceo.stops(line.id)
+            }
+        } else {
+            cached(
+                DataSources.networkStopsCacheName(line.networkId, line.id), forceRefresh, Stop::fromJson, Stop::toJson,
+                notBefore = network.indexAt ?: 0L,
+            ) { traceo.stops(line.id, line.networkId) }
         }
     }
 
@@ -40,16 +65,19 @@ class ReferentialRepository(context: Context) {
         dir.listFiles()?.forEach { it.delete() }
     }
 
+    /** @param notBefore un fichier enregistré avant cette date est périmé, quel que soit son âge */
     private fun <T> cached(
         name: String,
         forceRefresh: Boolean,
         fromJson: (JSONObject) -> T,
         toJson: (T) -> JSONObject,
+        notBefore: Long = 0L,
         download: () -> List<T>,
     ): List<T> {
         val file = File(dir, name)
         val cache = readCache(file, fromJson)
-        if (!forceRefresh && cache != null && System.currentTimeMillis() - cache.first < TTL_MS && cache.second.isNotEmpty()) {
+        val recent = cache != null && System.currentTimeMillis() - cache.first < TTL_MS && cache.first >= notBefore
+        if (!forceRefresh && cache != null && recent && cache.second.isNotEmpty()) {
             return cache.second
         }
         return try {

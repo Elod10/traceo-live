@@ -16,12 +16,15 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import fr.gotraceo.live.R
 import fr.gotraceo.live.data.DataSources
+import fr.gotraceo.live.data.NetworkCatalog
+import fr.gotraceo.live.data.Networks
 import fr.gotraceo.live.data.PassageRoute
 import fr.gotraceo.live.data.PositionReader
 import fr.gotraceo.live.data.Prefs
 import fr.gotraceo.live.data.ProximityState
 import fr.gotraceo.live.data.WidgetState
 import fr.gotraceo.live.widget.DepartureFormat
+import fr.gotraceo.live.widget.Sources
 import fr.gotraceo.live.widget.WidgetFormat
 import fr.gotraceo.live.widget.WidgetProviders
 import fr.gotraceo.live.widget.WidgetRenderer
@@ -107,11 +110,17 @@ class MainActivity : Activity() {
         widgetsTitle.visibility = if (ids.isEmpty()) View.GONE else View.VISIBLE
         val needsExactAlarms = ids.isNotEmpty() && WidgetUpdater.needsExactAlarmAccess(this)
         exactAlarmCard.visibility = if (needsExactAlarms) View.VISIBLE else View.GONE
+        // La mention suit les réseaux des widgets affichés.
+        Mentions.bind(findViewById(R.id.data_mention), Sources.usedNetworks(this))
         val now = System.currentTimeMillis()
-        ids.forEach { widgetsContainer.addView(widgetView(it, now)) }
+        // Le réseau n'est nommé que s'il y a de quoi les confondre : dès qu'un widget sort d'Île-de-France.
+        val catalog = Sources.catalog(this).read()
+            .takeIf { ids.any { id -> prefs.config(id)?.let { !Networks.isIdfm(it.networkId) } == true } }
+        ids.forEach { widgetsContainer.addView(widgetView(it, now, catalog)) }
     }
 
-    private fun widgetView(id: Int, now: Long): View {
+    /** @param catalog les réseaux à nommer sur les cartes, ou null si tous les widgets sont franciliens */
+    private fun widgetView(id: Int, now: Long, catalog: NetworkCatalog?): View {
         val view = layoutInflater.inflate(R.layout.item_widget, widgetsContainer, false)
         val manager = AppWidgetManager.getInstance(this)
         val provider = manager.getAppWidgetInfo(id)?.provider?.className
@@ -142,11 +151,13 @@ class MainActivity : Activity() {
 
         if (shownWidth < available * SIDE_BY_SIDE_BELOW) layOutSideBySide(view)
 
+        val formatName = entry?.let { getString(it.nameRes) } ?: getString(R.string.widget_name)
+        val networkName = config?.networkId?.let { networkId -> catalog?.let { it.byId(networkId)?.city ?: networkId } }
         view.findViewById<TextView>(R.id.item_widget_title).text =
-            entry?.let { getString(it.nameRes) } ?: getString(R.string.widget_name)
+            if (networkName == null) formatName else getString(R.string.main_widget_title_network, formatName, networkName)
 
         val reconfigure = config != null && !proximity &&
-            DataSources.route(config.stop.stopIds, hasKey) == PassageRoute.RECONFIGURE
+            DataSources.route(config, hasKey) == PassageRoute.RECONFIGURE
         val needsAccess = config?.auto == true && !PositionReader(this).hasPreciseAccess
         val subtitle = view.findViewById<TextView>(R.id.item_widget_subtitle)
         val summary = if (proximity) nearby?.let(::summaryOf) else state
