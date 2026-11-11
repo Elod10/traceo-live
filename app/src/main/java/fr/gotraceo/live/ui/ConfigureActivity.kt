@@ -229,6 +229,7 @@ class ConfigureActivity : Activity() {
     private lateinit var notifyIcon: ImageView
     private lateinit var notifySummary: TextView
     private lateinit var save: Button
+    private lateinit var dataMention: TextView
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -352,6 +353,7 @@ class ConfigureActivity : Activity() {
         notifyIcon = findViewById(R.id.notify_icon)
         notifySummary = findViewById(R.id.notify_summary)
         save = findViewById(R.id.save)
+        dataMention = findViewById(R.id.data_mention)
         findViewById<TextView>(R.id.data_mention).movementMethod = LinkMovementMethod.getInstance()
 
         val header =layoutInflater.inflate(R.layout.list_preview_header, list, false)
@@ -521,6 +523,8 @@ class ConfigureActivity : Activity() {
         colorSection.visibility = if (choosesFromList) View.GONE else View.VISIBLE
         notifySection.visibility = colorSection.visibility
         save.setText(if (choosesFromList) R.string.continue_label else R.string.save_widget)
+        // La mention est celle du réseau dont l'étape montre les données.
+        Mentions.bind(dataMention, listOf(network.id))
         if (step == Step.DIRECTION || step == Step.AUTO_COLOR) renderSwatches()
         hideKeyboard()
     }

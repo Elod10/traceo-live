@@ -110,6 +110,8 @@ class MainActivity : Activity() {
         widgetsTitle.visibility = if (ids.isEmpty()) View.GONE else View.VISIBLE
         val needsExactAlarms = ids.isNotEmpty() && WidgetUpdater.needsExactAlarmAccess(this)
         exactAlarmCard.visibility = if (needsExactAlarms) View.VISIBLE else View.GONE
+        // La mention suit les réseaux des widgets affichés.
+        Mentions.bind(findViewById(R.id.data_mention), Sources.usedNetworks(this))
         val now = System.currentTimeMillis()
         // Le réseau n'est nommé que s'il y a de quoi les confondre : dès qu'un widget sort d'Île-de-France.
         val catalog = Sources.catalog(this).read()

@@ -45,13 +45,21 @@ class SettingsActivity : Activity() {
                 else -> R.string.main_source_traceo
             },
         )
-        findViewById<TextView>(R.id.source_detail).setText(
+        val idfmDetail = getString(
             when {
                 paused -> R.string.main_source_prim_paused_detail
                 hasKey -> R.string.main_source_prim_detail
                 else -> R.string.main_source_traceo_detail
             },
         )
+        // La source décrite est celle de l'Île-de-France : les autres réseaux utilisés ont la leur.
+        val catalog = Sources.catalog(this).read()
+        val others = Sources.usedNetworks(this).filter { !Networks.isIdfm(it) }.map { catalog.byId(it)?.city ?: it }
+        findViewById<TextView>(R.id.source_detail).text = if (others.isEmpty()) {
+            idfmDetail
+        } else {
+            idfmDetail + "\n\n" + getString(R.string.settings_source_networks, others.joinToString(", "))
+        }
         findViewById<TextView>(R.id.key_title).setText(if (hasKey) R.string.settings_key_edit else R.string.settings_key_add)
         val usage = prefs.primUsage()
         findViewById<TextView>(R.id.key_subtitle).text = if (hasKey) {
