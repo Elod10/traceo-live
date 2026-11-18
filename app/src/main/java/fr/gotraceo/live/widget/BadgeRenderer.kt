@@ -10,10 +10,15 @@ import android.graphics.RectF
 import android.graphics.Typeface
 import fr.gotraceo.live.R
 import fr.gotraceo.live.data.Line
+import fr.gotraceo.live.data.Networks
 import kotlin.math.max
 import kotlin.math.roundToInt
 
-/** Dessine la pastille (couleur officielle + indice) d'une ligne. */
+/**
+ * Dessine la pastille (couleur officielle + indice) d'une ligne. Le rond du métro et du RER et les
+ * filets du tramway sont le code de formes de l'Île-de-France : ailleurs, la pastille est la même
+ * pour tous les modes, à la couleur que le réseau donne à sa ligne.
+ */
 object BadgeRenderer {
 
     fun render(context: Context, line: Line, heightDp: Float = 28f): Bitmap {
@@ -36,11 +41,12 @@ object BadgeRenderer {
         val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(bmp)
         val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = bg }
-        val rounded = line.mode == "metro" || line.isRer()
+        val idfm = Networks.isIdfm(line.networkId)
+        val rounded = idfm && (line.mode == "metro" || line.isRer())
         val radius = if (rounded) h / 2f else h * 0.22f
         canvas.drawRoundRect(RectF(0f, 0f, w.toFloat(), h.toFloat()), radius, radius, bgPaint)
 
-        if (line.mode == "tram") {
+        if (idfm && line.mode == "tram") {
             // Rappel du pictogramme tramway : deux filets horizontaux.
             val bar = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = fg; strokeWidth = h * 0.06f }
             val inset = h * 0.14f

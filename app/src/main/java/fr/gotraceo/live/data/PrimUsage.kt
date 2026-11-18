@@ -133,6 +133,7 @@ object RefreshSchedule {
      * @param followsTraceo vrai si le widget passe par Tracéo
      * @param traceoNextAt dernier `nextAt` reçu de Tracéo, null ou 0 si inconnu
      * @param offsetMs décalage de cette installation
+     * @param sourceMinutes cadence de relevé du réseau chez Tracéo : 2 minutes en Île-de-France
      */
     fun dueAt(
         attemptedAt: Long?,
@@ -140,6 +141,7 @@ object RefreshSchedule {
         followsTraceo: Boolean,
         traceoNextAt: Long?,
         offsetMs: Long,
+        sourceMinutes: Int = DataSources.TRACEO_MIN_REFRESH_MINUTES,
     ): Long? {
         if (attemptedAt == null) return 0L
         if (refreshMinutes <= 0) return null
@@ -149,7 +151,7 @@ object RefreshSchedule {
         // Relevé déjà demandé (ou annonce périmée, après un échec) : on revient à l'intervalle.
         if (nextSnapshot <= attemptedAt) return byInterval
         // Au rythme de Tracéo, on suit ses relevés ; plus lentement, on attend aussi l'intervalle choisi.
-        val earliest = if (refreshMinutes <= DataSources.TRACEO_MIN_REFRESH_MINUTES) {
+        val earliest = if (refreshMinutes <= sourceMinutes) {
             attemptedAt + TRACEO_MIN_GAP_MS
         } else {
             byInterval

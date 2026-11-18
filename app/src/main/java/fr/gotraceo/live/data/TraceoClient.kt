@@ -18,6 +18,9 @@ class TraceoException(val kind: Kind, message: String, cause: Throwable? = null)
  * clé : Tracéo interroge PRIM et sert ses lignes, ses arrêts et son cache de passages SIRI ET.
  * Aucune clé ni en-tête particulier.
  *
+ * Tracéo sert aussi d'autres réseaux que l'Île-de-France, par les routes `/api/reseaux` : même forme de
+ * réponse, mais des identifiants opaques, propres à chaque réseau, qui partent tels quels.
+ *
  * Ce fichier n'utilise aucune API Android afin d'être testable sur JVM.
  *
  * @param warmedLines lignes dont les arrêts ont déjà été redemandés après un 503
@@ -40,6 +43,7 @@ class TraceoClient(
         /** Délai de lecture des listes : `/api/lines` pèse environ 32 Ko, `/api/stations` peut partir à froid. */
         private const val LIST_READ_TIMEOUT_MS = 30_000
         private const val PASSAGES_READ_TIMEOUT_MS = 12_000
+        private const val UNKNOWN_STOP_MESSAGE = "Arrêt ou ligne inconnus de Tracéo : reconfigurez ce widget."
 
         private val warmedInThisProcess: MutableSet<String> = ConcurrentHashMap.newKeySet()
 
@@ -49,13 +53,23 @@ class TraceoClient(
         private fun lineUrn(lineId: String): String = LINE_PREFIX + Referential.bareLineId(lineId)
     }
 
-    /** Toutes les lignes, triées comme celles du référentiel. */
+    /** Les réseaux servis en plus de l'Île-de-France, qui ne figure pas à ce catalogue. */
     @Throws(TraceoException::class)
-    fun lines(): List<Line> {
-        val root = get("$baseUrl/api/lines", LIST_READ_TIMEOUT_MS, "Liste des lignes introuvable chez Tracéo.")
+    fun networks(): List<Network> {
+        val root = get("$baseUrl/api/reseaux", PASSAGES_READ_TIMEOUT_MS, "Catalogue des réseaux introuvable chez Tracéo.")
+        val networks = root.optJSONArray("networks") ?: throw invalidResponse()
+        return (0 until networks.length()).mapNotNull { i -> networks.optJSONObject(i)?.let(Network::fromJson) }
+    }
+
+    /** Toutes les lignes d'un réseau, triées comme celles du référentiel. */
+    @Throws(TraceoException::class)
+    fun lines(networkId: String = Networks.IDFM): List<Line> {
+        val idfm = Networks.isIdfm(networkId)
+        val url = if (idfm) "$baseUrl/api/lines" else networkUrl(networkId) + "/lines"
+        val root = get(url, LIST_READ_TIMEOUT_MS, "Liste des lignes introuvable chez Tracéo.")
         val lines = root.optJSONArray("lines") ?: throw invalidResponse()
         return (0 until lines.length())
-            .mapNotNull { i -> lines.optJSONObject(i)?.let(::parseLine) }
+            .mapNotNull { i -> lines.optJSONObject(i)?.let { if (idfm) parseLine(it) else parseNetworkLine(it, networkId) } }
             .sortedWith(Referential.lineComparator)
     }
 
@@ -64,15 +78,55 @@ class TraceoClient(
      * d'actualisation : à froid, cet appel coûte du quota à Tracéo.
      */
     @Throws(TraceoException::class)
-    fun stops(lineId: String): List<Stop> {
-        val url = "$baseUrl/api/stations?line=" + Http.encode(lineUrn(lineId))
+    fun stops(lineId: String, networkId: String = Networks.IDFM): List<Stop> {
+        val idfm = Networks.isIdfm(networkId)
+        val url = if (idfm) {
+            "$baseUrl/api/stations?line=" + Http.encode(lineUrn(lineId))
+        } else {
+            networkUrl(networkId) + "/stations?line=" + Http.encode(lineId)
+        }
         val root = get(url, LIST_READ_TIMEOUT_MS, "Cette ligne est inconnue de Tracéo.")
         val stations = root.optJSONArray("stations") ?: throw invalidResponse()
-        return (0 until stations.length()).mapNotNull { i -> stations.optJSONObject(i)?.let(::parseStop) }
+        return (0 until stations.length()).mapNotNull { i ->
+            stations.optJSONObject(i)?.let { if (idfm) parseStop(it) else parseNetworkStop(it, networkId) }
+        }
     }
 
     /**
-     * Prochains passages d'une ligne à une zone d'arrêt.
+     * Index des arrêts d'un réseau hors Île-de-France, pour chercher les arrêts proches sur le
+     * téléphone. Demander l'index d'un réseau dit seulement à Tracéo qu'on s'y intéresse : la
+     * position n'est pas envoyée.
+     */
+    @Throws(TraceoException::class)
+    fun index(networkId: String): NetworkIndex {
+        val root = get(networkUrl(networkId) + "/index", LIST_READ_TIMEOUT_MS, "Index des arrêts introuvable chez Tracéo.")
+        val linesJson = root.optJSONArray("lines") ?: throw invalidResponse()
+        val stopsJson = root.optJSONArray("stops") ?: throw invalidResponse()
+        // Les arrêts désignent leurs lignes par leur position : une ligne illisible garde donc sa place.
+        val lines = (0 until linesJson.length()).map { i -> linesJson.optJSONObject(i)?.let { parseNetworkLine(it, networkId) } }
+        var skipped = 0
+        val stops = (0 until stopsJson.length()).mapNotNull { i ->
+            val stop = stopsJson.optJSONObject(i)?.let { parseIndexedStop(it, lines) }
+            if (stop == null) skipped++
+            stop
+        }
+        return NetworkIndex(SiriParser.parseTime(root.optStringOrNull("builtAt")), lines.filterNotNull(), stops, skipped)
+    }
+
+    private fun parseIndexedStop(o: JSONObject, lines: List<Line?>): IndexedStop? {
+        val zone = o.optStringOrNull("zone") ?: return null
+        val name = o.optStringOrNull("name") ?: return null
+        val lat = o.optDouble("lat")
+        val lon = o.optDouble("lon")
+        if (lat.isNaN() || lon.isNaN()) return null
+        val served = o.optJSONArray("lines") ?: return null
+        val lineIds = (0 until served.length()).mapNotNull { i -> lines.getOrNull(served.optInt(i, -1))?.id }.distinct()
+        if (lineIds.isEmpty()) return null
+        return IndexedStop(name = name, town = o.optStringOrNull("town"), lat = lat, lon = lon, zone = zone, lineIds = lineIds)
+    }
+
+    /**
+     * Prochains passages d'une ligne à une zone d'arrêt, en Île-de-France.
      *
      * Un 503 peut venir d'arrêts absents du cache de Tracéo : les demander une fois par ligne et par
      * processus le remplit, sans insister si la route est coupée.
@@ -90,12 +144,39 @@ class TraceoClient(
         requestPassages(stopId, lineId)
     }
 
+    /**
+     * Prochains passages d'une ligne à une station d'un réseau. Hors Île-de-France, un 503 ne se
+     * rattrape pas en demandant les arrêts : le réseau est coupé, ou son relevé n'est pas prêt.
+     */
+    @Throws(TraceoException::class)
+    fun departures(stopId: String, lineId: String, networkId: String): PassageSnapshot {
+        if (Networks.isIdfm(networkId)) return departures(stopId, lineId)
+        val url = networkUrl(networkId) + "/passages?line=" + Http.encode(lineId) + "&stop=" + Http.encode(stopId)
+        return snapshot(get(url, PASSAGES_READ_TIMEOUT_MS, UNKNOWN_STOP_MESSAGE), stopId, lineId)
+    }
+
     override fun passages(stopId: String, lineId: String): PassageSnapshot = departures(stopId, lineId)
+
+    /** Les passages d'un réseau, vus comme une source : en Île-de-France, ce client lui-même. */
+    fun forNetwork(networkId: String): PassageSource =
+        if (Networks.isIdfm(networkId)) this else PassageSource { stopId, lineId -> departures(stopId, lineId, networkId) }
+
+    /** Racine des routes d'un réseau. Son identifiant vient du catalogue : il doit pouvoir entrer dans un chemin. */
+    private fun networkUrl(networkId: String): String {
+        if (!Networks.isValidId(networkId)) {
+            throw TraceoException(TraceoException.Kind.BAD_REQUEST, "Réseau inconnu : reconfigurez ce widget.")
+        }
+        return "$baseUrl/api/reseaux/$networkId"
+    }
 
     private fun requestPassages(stopId: String, lineId: String): PassageSnapshot {
         val line = lineUrn(lineId)
         val url = "$baseUrl/api/widget/passages?line=" + Http.encode(line) + "&stop=" + Http.encode(stopId)
-        val root = get(url, PASSAGES_READ_TIMEOUT_MS, "Arrêt ou ligne inconnus de Tracéo : reconfigurez ce widget.")
+        return snapshot(get(url, PASSAGES_READ_TIMEOUT_MS, UNKNOWN_STOP_MESSAGE), stopId, line)
+    }
+
+    /** Les deux routes de passages ont le même corps. */
+    private fun snapshot(root: JSONObject, stopId: String, line: String): PassageSnapshot {
         val passages = root.optJSONArray("passages") ?: throw invalidResponse()
         return PassageSnapshot(
             departures = (0 until passages.length()).mapNotNull { i ->
@@ -160,6 +241,31 @@ class TraceoClient(
         val id = o.optStringOrNull("id") ?: return null
         val name = o.optStringOrNull("name") ?: return null
         return Stop(name = name, town = null, stopIds = listOf(id))
+    }
+
+    /** L'identifiant d'une ligne d'un autre réseau est opaque : il est gardé entier, deux-points compris. */
+    private fun parseNetworkLine(o: JSONObject, networkId: String): Line? {
+        val id = o.optStringOrNull("id") ?: return null
+        val code = o.optStringOrNull("code")
+        val name = o.optStringOrNull("name") ?: code ?: id
+        return Line(
+            id = id,
+            name = name,
+            shortName = code ?: name,
+            mode = Networks.appMode(o.optJSONObject("mode")?.optStringOrNull("key").orEmpty()),
+            color = o.optStringOrNull("color")?.let(Referential::cleanColor),
+            textColor = o.optStringOrNull("textColor")?.let(Referential::cleanColor),
+            networkId = networkId,
+            // Absent, le champ ne dit rien : la ligne est supposée avoir du temps réel.
+            realtime = o.optBoolean("realtime", true),
+        )
+    }
+
+    /** Une station d'un autre réseau : tous les quais de l'arrêt, dans les deux sens. */
+    private fun parseNetworkStop(o: JSONObject, networkId: String): Stop? {
+        val id = o.optStringOrNull("id") ?: return null
+        val name = o.optStringOrNull("name") ?: return null
+        return Stop(name = name, town = o.optStringOrNull("town"), stopIds = listOf(id), networkId = networkId)
     }
 
     private fun parsePassage(o: JSONObject, stopId: String, line: String): Departure? {
