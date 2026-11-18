@@ -255,4 +255,4 @@ les statistiques de fiabilité, qui reposent sur PRIM.
 | P2 | Relevé en continu ou à la demande ? | À la demande, mise en sommeil après dix minutes sans requête |
 | P3 | Affiche-t-on le retard à Troyes ? | Oui si le calcul à partir de l'horaire théorique se vérifie sur place, sinon non |
 | P4 | Quand la branche `multi-reseaux` est-elle publiée sur GitHub ? | Quand la première PR est prête. Le dépôt est public : ce dossier le sera aussi |
-| P5 | Second réseau | Bordeaux, une fois le pilote recetté |
+| P5 | Second réseau | Tranché le 18/11/2026 : les 21 réseaux du groupe 1 de l'étude, voir [reseaux-ouverts.md](reseaux-ouverts.md) |
