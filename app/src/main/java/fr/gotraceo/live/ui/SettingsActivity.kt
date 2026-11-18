@@ -4,11 +4,13 @@ import android.app.Activity
 import android.content.Intent
 import android.os.Bundle
 import android.view.View
+import android.widget.LinearLayout
 import android.widget.RadioButton
 import android.widget.RadioGroup
 import android.widget.TextView
 import fr.gotraceo.live.R
 import fr.gotraceo.live.data.DataSources
+import fr.gotraceo.live.data.NetworkCatalog
 import fr.gotraceo.live.data.Networks
 import fr.gotraceo.live.data.Prefs
 import fr.gotraceo.live.widget.QuotaAlerts
@@ -27,7 +29,11 @@ class SettingsActivity : Activity() {
         prefs = Prefs(this)
 
         findViewById<View>(R.id.back).setOnClickListener { finish() }
-        findViewById<View>(R.id.open_key).setOnClickListener { startActivity(Intent(this, KeyActivity::class.java)) }
+        // Avec d'autres réseaux au catalogue, on choisit d'abord le réseau de la clé.
+        findViewById<View>(R.id.open_key).setOnClickListener {
+            val target = if (Sources.catalog(this).read().others.isEmpty()) KeyActivity::class.java else KeyNetworksActivity::class.java
+            startActivity(Intent(this, target))
+        }
         findViewById<View>(R.id.open_sources).setOnClickListener { startActivity(Intent(this, SourcesActivity::class.java)) }
         findViewById<View>(R.id.open_privacy).setOnClickListener { PrivacyPolicy.open(this) }
         findViewById<View>(R.id.open_support).setOnClickListener { Support.open(this) }
@@ -38,34 +44,43 @@ class SettingsActivity : Activity() {
         // La source, le texte d'aide et les fréquences proposées dépendent de la clé.
         val hasKey = prefs.hasApiKey
         val paused = prefs.primPaused
-        findViewById<TextView>(R.id.source_title).setText(
+        // Avec d'autres réseaux au catalogue, chaque source dit le réseau qu'elle sert.
+        val catalog = Sources.catalog(this).read()
+        val multiNetwork = catalog.others.isNotEmpty()
+        val idfmTitle = getString(
             when {
                 paused -> R.string.main_source_prim_paused
                 hasKey -> R.string.main_source_prim
                 else -> R.string.main_source_traceo
             },
         )
-        val idfmDetail = getString(
+        findViewById<TextView>(R.id.source_title).text =
+            if (multiNetwork) getString(R.string.settings_source_idfm, idfmTitle) else idfmTitle
+        findViewById<TextView>(R.id.source_detail).setText(
             when {
                 paused -> R.string.main_source_prim_paused_detail
                 hasKey -> R.string.main_source_prim_detail
                 else -> R.string.main_source_traceo_detail
             },
         )
-        // La source décrite est celle de l'Île-de-France : les autres réseaux utilisés ont la leur.
-        val catalog = Sources.catalog(this).read()
-        val others = Sources.usedNetworks(this).filter { !Networks.isIdfm(it) }.map { catalog.byId(it)?.city ?: it }
-        findViewById<TextView>(R.id.source_detail).text = if (others.isEmpty()) {
-            idfmDetail
-        } else {
-            idfmDetail + "\n\n" + getString(R.string.settings_source_networks, others.joinToString(", "))
-        }
-        findViewById<TextView>(R.id.key_title).setText(if (hasKey) R.string.settings_key_edit else R.string.settings_key_add)
-        val usage = prefs.primUsage()
-        findViewById<TextView>(R.id.key_subtitle).text = if (hasKey) {
-            getString(R.string.settings_key_usage, QuotaAlerts.number(usage.used), QuotaAlerts.number(usage.quota))
-        } else {
-            getString(R.string.settings_key_add_sub)
+        renderOtherSources(catalog)
+
+        // La clé PRIM n'est qu'une des clés possibles dès qu'il y a d'autres réseaux.
+        val primUsage = prefs.primUsage()
+        val usage = getString(R.string.settings_key_usage, QuotaAlerts.number(primUsage.used), QuotaAlerts.number(primUsage.quota))
+        findViewById<TextView>(R.id.key_title).setText(
+            when {
+                multiNetwork && hasKey -> R.string.settings_keys_edit
+                multiNetwork -> R.string.settings_keys_add
+                hasKey -> R.string.settings_key_edit
+                else -> R.string.settings_key_add
+            },
+        )
+        findViewById<TextView>(R.id.key_subtitle).text = when {
+            multiNetwork && hasKey -> getString(R.string.settings_keys_usage, usage)
+            multiNetwork -> getString(R.string.settings_keys_add_sub)
+            hasKey -> usage
+            else -> getString(R.string.settings_key_add_sub)
         }
         val fastest = fastestSourceMinutes(hasKey)
         findViewById<TextView>(R.id.refresh_help).setText(
@@ -77,6 +92,28 @@ class SettingsActivity : Activity() {
             },
         )
         renderRefreshChoices(fastest)
+    }
+
+    /** Une source par réseau hors Île-de-France des widgets posés : son nom, et la cadence de son relevé. */
+    private fun renderOtherSources(catalog: NetworkCatalog) {
+        val container = findViewById<LinearLayout>(R.id.other_sources)
+        container.removeAllViews()
+        Sources.usedNetworks(this).filter { !Networks.isIdfm(it) }.forEach { id ->
+            val network = catalog.byId(id)
+            val view = layoutInflater.inflate(R.layout.item_source_network, container, false)
+            view.findViewById<TextView>(R.id.source_network_title).text = when {
+                network == null -> getString(R.string.settings_source_network_city, id)
+                network.name == network.city -> getString(R.string.settings_source_network_city, network.city)
+                else -> getString(R.string.settings_source_network, network.city, network.name)
+            }
+            val minutes = network?.sourceMinutes ?: DataSources.TRACEO_MIN_REFRESH_MINUTES
+            view.findViewById<TextView>(R.id.source_network_detail).text = if (minutes == 1) {
+                getString(R.string.settings_source_network_every_minute)
+            } else {
+                getString(R.string.settings_source_network_every_n, minutes)
+            }
+            container.addView(view)
+        }
     }
 
     /**

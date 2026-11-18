@@ -93,6 +93,28 @@ class NetworkChoiceTest {
     }
 
     @Test
+    fun aNetworkWithOneModeSkipsTheModeStep() {
+        // Troyes : tout est en bus, il n'y a rien à choisir.
+        assertEquals(TransportMode.BUS, DataSources.onlyMode(tcat, hasKey = false))
+        assertEquals(TransportMode.BUS, DataSources.onlyMode(tcat, hasKey = true))
+        // Deux modes ou plus : l'étape reste.
+        val tramAndBus = network("duo", "Ailleurs", BoundingBox(1.0, 2.0, 3.0, 4.0), "tram", "bus")
+        assertNull(DataSources.onlyMode(tramAndBus, hasKey = false))
+        // L'Île-de-France garde toujours son étape du mode, avec ou sans clé.
+        assertNull(DataSources.onlyMode(Networks.ILE_DE_FRANCE, hasKey = false))
+        assertNull(DataSources.onlyMode(Networks.ILE_DE_FRANCE, hasKey = true))
+        // Un réseau qui n'est plus au catalogue garde le mode de sa ligne : son widget se modifie sans l'étape.
+        assertEquals(TransportMode.TRAM, DataSources.onlyMode(Networks.placeholder("parti", "tram"), hasKey = false))
+    }
+
+    @Test
+    fun onlyIleDeFranceTakesAPersonalKey() {
+        // PRIM demande une clé ; les données de TCAT sont ouvertes et passent par Tracéo.
+        assertTrue(DataSources.acceptsPersonalKey(Networks.ILE_DE_FRANCE))
+        assertFalse(DataSources.acceptsPersonalKey(tcat))
+    }
+
+    @Test
     fun rerAndTransilienStayInIleDeFrance() {
         val rail = network("fer", "Ailleurs", BoundingBox(1.0, 2.0, 3.0, 4.0), "rail")
         assertEquals(listOf(TransportMode.TRAIN), DataSources.modes(rail, hasKey = true))

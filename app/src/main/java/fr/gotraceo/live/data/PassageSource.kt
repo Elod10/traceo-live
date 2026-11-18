@@ -184,6 +184,19 @@ object DataSources {
             TransportMode.entries.filter { mode -> mode != TransportMode.RER && mode.apiModes.any { it in network.modes } }
         }
 
+    /**
+     * Le seul mode d'un réseau qui n'en propose qu'un (Troyes : le bus), sinon null. La configuration
+     * saute alors l'étape du mode : il n'y aurait rien à y choisir.
+     */
+    fun onlyMode(network: Network, hasKey: Boolean): TransportMode? = modes(network, hasKey).singleOrNull()
+
+    /**
+     * Vrai si le réseau accepte une clé personnelle, qui fait interroger le réseau par le téléphone :
+     * aujourd'hui seule l'Île-de-France (PRIM). Les données des autres réseaux sont ouvertes et passent
+     * par Tracéo, qui les relève déjà.
+     */
+    fun acceptsPersonalKey(network: Network): Boolean = network.isIdfm
+
     /** Intervalles à proposer quand la source la plus rapide des widgets posés est relevée toutes les [sourceMinutes]. */
     fun refreshChoices(all: List<Int>, sourceMinutes: Int): List<Int> =
         all.filter { refreshMinutes(it, sourceMinutes) == it }
