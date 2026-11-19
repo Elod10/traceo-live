@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Choix du réseau d'une clé API, quand Tracéo propose d'autres réseaux que l'Île-de-France. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@color/screen_background"
+    android:orientation="vertical">
+
+    <ImageButton
+        android:id="@+id/back"
+        style="@style/IconAction"
+        android:layout_marginStart="9dp"
+        android:contentDescription="@string/back"
+        android:src="@drawable/ic_back" />
+
+    <TextView
+        style="@style/Text.Display"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="@dimen/screen_padding"
+        android:layout_marginEnd="@dimen/screen_padding"
+        android:text="@string/key_networks_title" />
+
+    <TextView
+        style="@style/Text.Help"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="@dimen/screen_padding"
+        android:layout_marginTop="4dp"
+        android:layout_marginEnd="@dimen/screen_padding"
+        android:text="@string/key_networks_help" />
+
+    <TextView
+        style="@style/Text.Label"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginStart="@dimen/screen_padding"
+        android:layout_marginTop="14dp"
+        android:layout_marginEnd="@dimen/screen_padding"
+        android:layout_marginBottom="8dp"
+        android:text="@string/key_networks_label" />
+
+    <ListView
+        android:id="@+id/list"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:clipToPadding="false"
+        android:divider="@null"
+        android:dividerHeight="0dp"
+        android:listSelector="@android:color/transparent"
+        android:paddingBottom="24dp"
+        android:scrollbars="none" />
+</LinearLayout>
