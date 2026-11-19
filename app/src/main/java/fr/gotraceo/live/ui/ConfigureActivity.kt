@@ -53,7 +53,9 @@ import fr.gotraceo.live.data.PositionReader
 import fr.gotraceo.live.data.Prefs
 import fr.gotraceo.live.data.RankedLine
 import fr.gotraceo.live.data.ReferentialRepository
+import fr.gotraceo.live.data.SameNameStops
 import fr.gotraceo.live.data.Stop
+import fr.gotraceo.live.data.StopIndexStore
 import fr.gotraceo.live.data.TransportMode
 import fr.gotraceo.live.data.WidgetConfig
 import fr.gotraceo.live.data.WidgetState
@@ -1257,9 +1259,23 @@ class ConfigureActivity : Activity() {
                 if (stops.isEmpty()) {
                     showMessage(getString(R.string.no_stop), canRetry = true)
                 } else {
-                    adapter.setItems(stops.map { s -> RowItem(title = s.name, subtitle = s.town, chevron = true, payload = s) })
-                    showList()
-                    updateEmptyText()
+                    // Hors Île-de-France, aucun réseau ne donne la commune : deux arrêts de même nom
+                    // ne se distinguent que par leur position, lue dans l'index du réseau.
+                    val needsPlaces = !Networks.isIdfm(l.networkId) && SameNameStops.hasSameNames(stops)
+                    val store = AutoMode.store(this@ConfigureActivity, l.networkId)
+                    val indexAt = network.indexAt
+                    // La liste s'affiche tout de suite, avec l'index que le téléphone a déjà.
+                    showStops(stops, if (needsPlaces) withContext(Dispatchers.IO) { stopPlaces(store, l) } else emptyMap(), fromTop = true)
+                    // Il n'est demandé à Tracéo que dans ce cas, s'il manque ou s'il est périmé ; la
+                    // liste est alors redessinée, sans avoir fait attendre.
+                    val renewed = needsPlaces && withContext(Dispatchers.IO) {
+                        try {
+                            store.downloadIfOutdated(indexAt)
+                        } catch (e: IOException) {
+                            false
+                        }
+                    }
+                    if (renewed) showStops(stops, withContext(Dispatchers.IO) { stopPlaces(store, l) }, fromTop = false)
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -1267,6 +1283,29 @@ class ConfigureActivity : Activity() {
                 showMessage(getString(R.string.error_referential, e.message ?: e.javaClass.simpleName), canRetry = true)
             }
         }
+    }
+
+    /** Position des arrêts de la ligne d'après l'index du téléphone ; vide s'il n'y est pas. */
+    private fun stopPlaces(store: StopIndexStore, l: Line): Map<String, GeoPoint> =
+        store.all()?.let { SameNameStops.places(it, l.id) }.orEmpty()
+
+    /**
+     * La liste des arrêts. Sans commune, un arrêt n'a que son nom : ce qui sépare deux homonymes
+     * prend la place du sous-titre. Sans position, ils restent séparés et numérotés.
+     */
+    private fun showStops(stops: List<Stop>, places: Map<String, GeoPoint>, fromTop: Boolean) {
+        val items = SameNameStops.choices(stops, places).map { choice ->
+            RowItem(
+                title = choice.stop.name,
+                subtitle = choice.hint ?: choice.stop.town,
+                chevron = true,
+                payload = choice.stop,
+                searchOnly = choice.searchText,
+            )
+        }
+        adapter.setItems(items)
+        showList(keepScroll = !fromTop)
+        updateEmptyText()
     }
 
     // --- Sens et couleur ----------------------------------------------------------------------
@@ -1340,7 +1379,10 @@ class ConfigureActivity : Activity() {
      * le premier sens pour un format à un seul sens, « Tous les sens » pour les autres.
      */
     private fun preselect(allItem: RowItem, optionItems: List<RowItem>, l: Line, s: Stop) {
-        val previous = existing?.takeIf { it.line.id == l.id && it.stop.stopIds == s.stopIds }?.directions
+        // Un widget posé sur un seul quai retrouve ses sens dans l'arrêt qui réunit maintenant les deux.
+        val previous = existing?.takeIf {
+            it.line.id == l.id && it.networkId == l.networkId && it.stop.stopIds.isNotEmpty() && s.stopIds.containsAll(it.stop.stopIds)
+        }?.directions
         val wasAllDirections = previous != null && s.stopIds.all { previous[it]?.isEmpty() == true }
         if (previous != null && !wasAllDirections) {
             optionItems.forEach { item ->
