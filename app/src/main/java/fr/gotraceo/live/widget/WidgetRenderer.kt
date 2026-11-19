@@ -114,14 +114,22 @@ object WidgetRenderer {
             !PositionReader(context).hasPreciseAccess -> AutoHint(AutoMessage.NEEDS_ACCESS.label, AutoMessage.NEEDS_ACCESS.short)
             else -> auto?.hint(now)
         }
+        val uncovered = isAuto && auto?.uncovered == true
         return if (fixedFormat == WidgetFormat.PROXIMITE) {
-            WidgetModels.buildProximity(config, proximity, refreshing, widthDp, heightDp, now, night, hint)
+            val networkId = proximity?.entries?.firstOrNull()?.nearby?.line?.networkId ?: config?.networkId
+            WidgetModels.buildProximity(
+                config, proximity, refreshing, widthDp, heightDp, now, night, hint,
+                networkName = Sources.networkName(context, networkId),
+                uncovered = uncovered,
+            )
         } else {
             WidgetModels.build(
                 config, state, hasApiKey, refreshing, widthDp, heightDp, now, fixedFormat,
                 autoHint = hint,
                 autoDistanceM = auto?.distanceM.takeIf { isAuto },
                 night = night,
+                networkName = Sources.networkName(context, config?.networkId),
+                uncovered = uncovered,
             )
         }
     }
@@ -192,7 +200,10 @@ object WidgetRenderer {
             NoticeKind.RECONFIGURE ->
                 context.getString(R.string.widget_reconfigure_title) + ". " + context.getString(R.string.widget_reconfigure_body)
             NoticeKind.LOADING -> context.getString(R.string.widget_loading)
-            NoticeKind.NO_DEPARTURE -> model.stopName + ". " + context.getString(R.string.widget_no_departure)
+            NoticeKind.NO_NETWORK ->
+                context.getString(R.string.widget_no_network_title) + ". " + context.getString(R.string.widget_no_network_body)
+            NoticeKind.NO_DEPARTURE ->
+                model.stopName + ". " + (notice.detail ?: context.getString(R.string.widget_no_departure))
             NoticeKind.ERROR -> model.stopName + ". " + notice.detail.orEmpty()
         }
     }

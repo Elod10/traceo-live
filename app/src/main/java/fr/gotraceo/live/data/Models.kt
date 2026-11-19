@@ -7,7 +7,8 @@ import java.util.Locale
 
 /**
  * Modes de transport proposés dans le menu de configuration.
- * [apiModes] correspond au champ `transportmode` du référentiel des lignes IDFM.
+ * [apiModes] correspond au champ `transportmode` du référentiel des lignes IDFM, dont les autres
+ * réseaux reprennent le vocabulaire (cf. [Networks.appMode]).
  */
 enum class TransportMode(val label: String, val apiModes: List<String>) {
     METRO("Métro", listOf("metro")),
@@ -15,7 +16,37 @@ enum class TransportMode(val label: String, val apiModes: List<String>) {
     TRAIN("Train / Transilien", listOf("rail")),
     TRAM("Tramway", listOf("tram")),
     BUS("Bus / Noctilien", listOf("bus")),
-    OTHER("Câble / Funiculaire", listOf("cableway", "funicular"));
+    OTHER("Câble / Funiculaire", listOf("cableway", "funicular")),
+
+    /** Navettes fluviales ou maritimes : le référentiel d'Île-de-France n'en a pas. */
+    BOAT("Bateau", listOf("boat"));
+
+    /**
+     * Libellé du mode dans un réseau. Le Transilien et le Noctilien n'existent qu'en Île-de-France,
+     * et « câble » y est le nom du Câble C1 : ailleurs, c'est un téléphérique.
+     */
+    fun labelIn(networkId: String): String = when {
+        Networks.isIdfm(networkId) -> label
+        this == TRAIN -> "Train"
+        this == BUS -> "Bus"
+        this == OTHER -> "Téléphérique / Funiculaire"
+        else -> label
+    }
+
+    /**
+     * Libellé du mode dans ce réseau : il ne nomme que ce que le réseau a vraiment. Un réseau qui
+     * n'annonce ni l'un ni l'autre garde le libellé des deux.
+     */
+    fun labelIn(network: Network): String {
+        if (network.isIdfm || this != OTHER) return labelIn(network.id)
+        val cable = "cableway" in network.modes
+        val funicular = "funicular" in network.modes
+        return when {
+            cable && !funicular -> "Téléphérique"
+            funicular && !cable -> "Funiculaire"
+            else -> labelIn(network.id)
+        }
+    }
 
     /** Pour les lignes ferrées, on sépare le RER du reste (Transilien, TER...). */
     fun accepts(line: Line): Boolean = when (this) {
@@ -28,28 +59,52 @@ enum class TransportMode(val label: String, val apiModes: List<String>) {
     fun includes(line: Line): Boolean = line.mode in apiModes && accepts(line)
 
     companion object {
+        /** Les modes de l'Île-de-France, dans l'ordre du menu. */
+        val IDFM: List<TransportMode> = listOf(METRO, RER, TRAIN, TRAM, BUS, OTHER)
+
+        /**
+         * Les modes d'un autre réseau, dans l'ordre du menu : du plus structurant au plus rare. Le
+         * tram passe devant le train, qu'aucun réseau urbain ne met en avant ; pas de RER.
+         */
+        val ELSEWHERE: List<TransportMode> = listOf(METRO, TRAM, TRAIN, BUS, BOAT, OTHER)
+
         fun fromName(name: String?): TransportMode? = entries.firstOrNull { it.name == name }
     }
 }
 
-/** Une ligne du référentiel IDFM (jeu de données « referentiel-des-lignes »). */
+/**
+ * Une ligne d'un réseau. En Île-de-France, elle vient du référentiel IDFM (jeu de données
+ * « referentiel-des-lignes ») ou de Tracéo ; ailleurs, du catalogue de Tracéo.
+ */
 data class Line(
-    /** Identifiant IDFM de la ligne, ex. « C01742 ». */
+    /** Identifiant de la ligne dans son réseau : « C01742 » en Île-de-France, une chaîne opaque ailleurs. */
     val id: String,
     val name: String,
     val shortName: String,
     val mode: String,
     val subMode: String? = null,
+    /** Nom commercial du référentiel IDFM (« RER », « Noctilien »…), à ne pas confondre avec [networkId]. */
     val network: String? = null,
     val operator: String? = null,
     /** Couleur hexadécimale sans « # », ex. « EB2132 ». */
     val color: String? = null,
     val textColor: String? = null,
+    /** Réseau de la ligne (cf. [Networks]) : [id] n'est unique que dans ce réseau. */
+    val networkId: String = Networks.IDFM,
+    /** Faux quand Tracéo sait que la ligne n'apparaît jamais dans le flux temps réel de son réseau. */
+    val realtime: Boolean = true,
 ) {
     val lineRef: String get() = "STIF:Line::$id:"
 
+    /**
+     * Ce qui désigne la ligne dans les favoris et les lieux mémorisés. En Île-de-France, c'est
+     * l'identifiant seul, tel qu'il a été enregistré avant l'arrivée des autres réseaux.
+     */
+    val key: String get() = if (Networks.isIdfm(networkId)) id else "$networkId:$id"
+
+    /** Le RER n'existe qu'en Île-de-France : ailleurs, une ligne ferrée nommée « A » n'en est pas un. */
     fun isRer(): Boolean {
-        if (mode != "rail") return false
+        if (!Networks.isIdfm(networkId) || mode != "rail") return false
         if (network?.contains("RER", ignoreCase = true) == true) return true
         if (subMode?.contains("RER", ignoreCase = true) == true) return true
         val n = shortName.uppercase(Locale.ROOT).removePrefix("RER").trim()
@@ -73,6 +128,8 @@ data class Line(
         .putOpt("operator", operator)
         .putOpt("color", color)
         .putOpt("textColor", textColor)
+        .putOpt("networkId", storedNetworkId(networkId))
+        .putOpt("realtime", if (realtime) null else false)
 
     companion object {
         fun fromJson(o: JSONObject): Line = Line(
@@ -85,6 +142,8 @@ data class Line(
             operator = o.optStringOrNull("operator"),
             color = o.optStringOrNull("color"),
             textColor = o.optStringOrNull("textColor"),
+            networkId = o.networkIdOrIdfm(),
+            realtime = o.optBoolean("realtime", true),
         )
     }
 }
@@ -92,23 +151,29 @@ data class Line(
 /**
  * Un arrêt d'une ligne. Les arrêts portant le même nom dans la même commune
  * (typiquement un quai par sens) sont regroupés : [stopIds] contient alors plusieurs
- * identifiants IDFM (« IDFM:463158 » ou « IDFM:monomodalStopPlace:58879 »).
+ * identifiants IDFM (« IDFM:463158 » ou « IDFM:monomodalStopPlace:58879 »). Hors Île-de-France,
+ * c'est un arrêt du réseau tel que Tracéo le sert, à l'identifiant opaque : un seul le plus souvent,
+ * plusieurs quand le réseau ne rattache pas les deux sens d'un arrêt (cf. [SameNameStops]).
  */
 data class Stop(
     val name: String,
     val town: String?,
     val stopIds: List<String>,
+    /** Réseau de l'arrêt (cf. [Networks]) : [stopIds] n'a de sens que dans ce réseau. */
+    val networkId: String = Networks.IDFM,
 ) {
     fun toJson(): JSONObject = JSONObject()
         .put("name", name)
         .putOpt("town", town)
         .put("stopIds", JSONArray(stopIds))
+        .putOpt("networkId", storedNetworkId(networkId))
 
     companion object {
         fun fromJson(o: JSONObject): Stop = Stop(
             name = o.optString("name"),
             town = o.optStringOrNull("town"),
             stopIds = o.optJSONArray("stopIds").toStringList(),
+            networkId = o.networkIdOrIdfm(),
         )
     }
 }
@@ -214,6 +279,9 @@ data class WidgetConfig(
     /** Vrai si la ligne et l'arrêt suivent la position : ils sont réécrits quand on touche le widget. */
     val auto: Boolean = false,
 ) {
+    /** Réseau du widget : celui de sa ligne. Un widget enregistré sans réseau est francilien. */
+    val networkId: String get() = line.networkId
+
     /** Vrai si le widget ne suit qu'un seul sens : un sens coché, ou un seul quai parmi plusieurs. */
     val isSingleDirection: Boolean
         get() {
@@ -268,6 +336,10 @@ data class WidgetState(
     val dataAt: Long? = null,
     /** Faux si le relevé est ancien ; null si la source répond en direct. */
     val fresh: Boolean? = null,
+    /** Heure du réveil de son réseau, où le widget doit revenir ; null s'il n'en attend pas (cf. [RefreshSchedule.wakeAt]). */
+    val wakeAt: Long? = null,
+    /** Retours déjà faits à la suite pour ce réveil. */
+    val wakeReturns: Int = 0,
 ) {
     /** Vrai si les passages viennent d'un relevé de la source, et non d'une réponse en direct. */
     val isSnapshot: Boolean get() = fresh != null
@@ -279,6 +351,8 @@ data class WidgetState(
         .putOpt("error", error)
         .putOpt("dataAt", dataAt)
         .putOpt("fresh", fresh)
+        .putOpt("wakeAt", wakeAt)
+        .putOpt("wakeReturns", wakeReturns.takeIf { it > 0 })
 
     companion object {
         fun fromJson(o: JSONObject): WidgetState {
@@ -293,6 +367,8 @@ data class WidgetState(
                 // Absents des états enregistrés avant l'arrivée de Tracéo.
                 dataAt = o.optLongOrNull("dataAt"),
                 fresh = if (o.has("fresh") && !o.isNull("fresh")) o.optBoolean("fresh") else null,
+                wakeAt = o.optLongOrNull("wakeAt"),
+                wakeReturns = o.optInt("wakeReturns"),
             )
         }
     }
@@ -304,6 +380,15 @@ fun JSONObject.optStringOrNull(key: String): String? {
     if (!has(key) || isNull(key)) return null
     return optString(key).takeIf { it.isNotBlank() }
 }
+
+/**
+ * Réseau à enregistrer : rien pour l'Île-de-France, dont les enregistrements gardent ainsi la forme
+ * qu'ils avaient avant l'arrivée des autres réseaux.
+ */
+internal fun storedNetworkId(networkId: String): String? = networkId.takeUnless(Networks::isIdfm)
+
+/** Réseau lu dans un enregistrement : l'Île-de-France quand il n'y figure pas. */
+internal fun JSONObject.networkIdOrIdfm(): String = optStringOrNull("networkId") ?: Networks.IDFM
 
 fun JSONObject.optLongOrNull(key: String): Long? {
     if (!has(key) || isNull(key)) return null

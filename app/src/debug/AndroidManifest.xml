@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Build de debug seulement : le HTTP en clair n'est permis que si l'adresse d'essai de Tracéo
+     (clé traceo.debugUrl de local.properties) n'est pas en HTTPS. Le build de release n'a pas cet
+     attribut et ne connaît que la production. -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application android:usesCleartextTraffic="${traceoCleartext}" />
+
+</manifest>
