@@ -182,6 +182,18 @@ Une PR par lot, vers `multi-reseaux`.
 La position ne peut pas être la seule entrée : on configure souvent un widget pour un lieu où l'on
 n'est pas, et un usager qui refuse la position doit pouvoir poser un widget fixe.
 
+### Décisions du 18 novembre 2026, après les maquettes
+
+6. **Un réseau d'un seul mode saute l'étape du mode.** À Troyes, tout est en bus : la
+   configuration passe du réseau aux lignes, 4 étapes au lieu de 5. L'option automatique et
+   « Garder la ligne et l'arrêt actuels » passent en tête de la liste des lignes. Le compteur
+   d'étapes suit le réseau coché. L'Île-de-France garde son étape du mode.
+7. **Réglages par réseau.** « Source des données » donne une source par réseau des widgets posés
+   (« Troyes : TCAT via Tracéo », avec sa cadence). Dès que le catalogue propose un autre réseau,
+   « Ajouter une clé API » ouvre le choix du réseau de la clé. Seule l'Île-de-France en accepte une
+   aujourd'hui ; les autres réseaux y figurent avec la raison : leurs données sont ouvertes et
+   Tracéo les relève déjà. Sans autre réseau au catalogue, rien ne change.
+
 ### Le mode automatique et le format À proximité
 
 - **Île-de-France : rien ne change.** Le téléphone construit toujours son index à partir de l'open
@@ -243,4 +255,4 @@ les statistiques de fiabilité, qui reposent sur PRIM.
 | P2 | Relevé en continu ou à la demande ? | À la demande, mise en sommeil après dix minutes sans requête |
 | P3 | Affiche-t-on le retard à Troyes ? | Oui si le calcul à partir de l'horaire théorique se vérifie sur place, sinon non |
 | P4 | Quand la branche `multi-reseaux` est-elle publiée sur GitHub ? | Quand la première PR est prête. Le dépôt est public : ce dossier le sera aussi |
-| P5 | Second réseau | Bordeaux, une fois le pilote recetté |
+| P5 | Second réseau | Tranché le 18/11/2026 : les 21 réseaux du groupe 1 de l'étude, voir [reseaux-ouverts.md](reseaux-ouverts.md) |

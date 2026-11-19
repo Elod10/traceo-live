@@ -5,11 +5,14 @@ import fr.gotraceo.live.data.DataSources
 import fr.gotraceo.live.data.Departure
 import fr.gotraceo.live.data.Directions
 import fr.gotraceo.live.data.Line
+import fr.gotraceo.live.data.NetworkMentions
+import fr.gotraceo.live.data.Networks
 import fr.gotraceo.live.data.PassageRoute
 import fr.gotraceo.live.data.PrimClient
 import fr.gotraceo.live.data.Proximity
 import fr.gotraceo.live.data.ProximityEntry
 import fr.gotraceo.live.data.ProximityState
+import fr.gotraceo.live.data.RefreshSchedule
 import fr.gotraceo.live.data.TraceoClient
 import fr.gotraceo.live.data.WidgetConfig
 import fr.gotraceo.live.data.WidgetState
@@ -236,9 +239,69 @@ data class DirectionGroup(val label: String, val passages: List<Passage>) {
 
 enum class BadgeShape { CIRCLE, SQUARE, BUS, TRAM }
 
-data class LineBadge(val label: String, val shape: BadgeShape)
+/**
+ * @param label code porté par la pastille, coupé s'il est trop long
+ * @param textScale taille du texte par rapport à celle d'un code court
+ * @param code code entier de la ligne, pour les lecteurs d'écran
+ */
+data class LineBadge(val label: String, val shape: BadgeShape, val textScale: Float = 1f, val code: String = label)
 
-enum class NoticeKind { NOT_CONFIGURED, RECONFIGURE, LOADING, NO_DEPARTURE, ERROR }
+/** Le code d'une ligne d'un réseau hors Île-de-France, tel que sa pastille le porte. */
+object BadgeLabels {
+
+    /** Au-delà, un code ne tient plus dans une pastille. */
+    const val MAX_LENGTH = 7
+
+    /** Caractères gardés au début d'un code coupé ; la fin en garde autant. */
+    private const val HEAD = 3
+
+    /**
+     * Le code entier s'il tient, au besoin sans ses espaces (« Flexo 51 » devient « Flexo51 »). Sinon
+     * il est coupé au milieu, et la coupe se voit : la fin d'un code est ce qui distingue les lignes
+     * d'une même famille, « Navette 12 » et « Navette 14 » ne doivent pas porter la même pastille.
+     */
+    fun label(code: String): String {
+        val text = code.trim()
+        if (text.length <= MAX_LENGTH) return text
+        val tight = text.filterNot { it.isWhitespace() }
+        if (tight.length <= MAX_LENGTH) return tight
+        return tight.take(HEAD) + "…" + tight.takeLast(MAX_LENGTH - HEAD - 1)
+    }
+
+    /**
+     * Le code et la taille de son texte, en fraction de la hauteur, pour la pastille des listes de
+     * l'application. En Île-de-France, rien ne change : le code est tronqué à [MAX_LENGTH] caractères.
+     */
+    fun forList(line: Line): Pair<String, Float> {
+        val idfm = Networks.isIdfm(line.networkId)
+        val code = line.shortName.trim().ifEmpty { line.name.trim() }
+        val label = if (idfm) code.take(MAX_LENGTH) else label(code)
+        val size = when {
+            label.length <= 3 -> 0.64f
+            idfm || label.length <= 5 -> 0.54f
+            else -> 0.46f
+        }
+        return label to size
+    }
+
+    /** Un code long s'écrit plus petit, pour que la pastille ne prenne pas la place du nom de l'arrêt. */
+    fun textScale(label: String): Float = when {
+        label.length <= 3 -> 1f
+        label.length <= 5 -> 0.84f
+        else -> 0.7f
+    }
+}
+
+enum class NoticeKind {
+    NOT_CONFIGURED,
+    RECONFIGURE,
+    LOADING,
+    NO_DEPARTURE,
+    ERROR,
+
+    /** Widget qui suit la position, emmené là où aucun réseau n'a d'arrêt à portée. */
+    NO_NETWORK,
+}
 
 /** Un sens d'une ligne du format À proximité. */
 data class ProximityDirection(val label: String, val first: Passage, val next: Passage?)
@@ -489,7 +552,7 @@ object WidgetContent {
     fun describe(model: WidgetModel): String {
         if (model.format == WidgetFormat.PROXIMITE) return describeProximity(model)
         val parts = ArrayList<String>()
-        model.line?.let { parts += "Ligne ${it.label}" }
+        model.line?.let { parts += "Ligne ${it.code}" }
         if (model.stopName.isNotEmpty()) parts += model.stopName
         val header = parts.joinToString(", ")
         val body = model.groups.joinToString(" ") { group ->
@@ -508,7 +571,7 @@ object WidgetContent {
                 val then = direction.next?.let { ", puis ${it.spokenWait}" }.orEmpty()
                 "Vers ${direction.label} : ${direction.first.spokenWait}$then."
             }.ifEmpty { "Aucun passage." }
-            "Ligne ${row.badge.label}, ${row.place}. $directions"
+            "Ligne ${row.badge.code}, ${row.place}. $directions"
         }
         val stale = if (model.stale) " Actualisation impossible, données de ${model.timeLabel}." else ""
         val hint = model.autoHint?.let { " $it." }.orEmpty()
@@ -540,6 +603,8 @@ object WidgetModels {
         autoHint: AutoHint? = null,
         autoDistanceM: Int? = null,
         night: Boolean = true,
+        networkName: String? = null,
+        uncovered: Boolean = false,
     ): WidgetModel {
         val line = config?.line
         val rail = line?.mode == "rail"
@@ -552,11 +617,16 @@ object WidgetModels {
         val passages = upcoming.map { WidgetContent.passage(it, now, line?.mode.orEmpty()) }
         val notice = when {
             config == null -> Notice(NoticeKind.NOT_CONFIGURED)
-            DataSources.route(config.stop.stopIds, hasApiKey) == PassageRoute.RECONFIGURE -> Notice(NoticeKind.RECONFIGURE)
+            // Les passages gardés sont ceux d'une autre ville : le dire vaut mieux que les montrer.
+            uncovered -> Notice(NoticeKind.NO_NETWORK)
+            DataSources.route(config, hasApiKey) == PassageRoute.RECONFIGURE -> Notice(NoticeKind.RECONFIGURE)
             passages.isNotEmpty() -> null
             state == null -> Notice(NoticeKind.LOADING)
             state.error != null -> Notice(NoticeKind.ERROR, state.error)
-            else -> Notice(NoticeKind.NO_DEPARTURE)
+            // Le réseau se réveille : son premier relevé arrive, « Aucun passage » serait faux.
+            RefreshSchedule.awaitsWake(state.wakeAt, now) -> Notice(NoticeKind.LOADING)
+            // Une ligne absente du flux temps réel n'aura jamais de passage : mieux vaut le dire.
+            else -> Notice(NoticeKind.NO_DEPARTURE, NO_REALTIME.takeIf { line?.realtime == false })
         }
         // Un relevé se date à l'heure de la source, pas à celle du téléphone.
         val snapshot = state?.takeIf { it.isSnapshot }
@@ -585,7 +655,7 @@ object WidgetModels {
             refreshing = refreshing,
             notice = notice,
             sourceLabel = if (snapshot != null && !quiet) TraceoClient.SOURCE_NAME else null,
-            sourceDetail = if (snapshot != null && !quiet) TraceoClient.SOURCE_DETAIL else null,
+            sourceDetail = if (snapshot != null && !quiet) snapshotSource(config?.networkId, networkName) else null,
             liveSource = if (snapshot == null && !quiet && shownAt > 0L) PrimClient.SOURCE_NAME else null,
             oldSnapshot = snapshot?.fresh == false && !quiet,
             autoHint = hint?.label,
@@ -594,10 +664,19 @@ object WidgetModels {
     }
 
     /**
+     * Source à citer en toutes lettres à côté de l'heure d'un relevé : les données franciliennes sont
+     * celles de PRIM, celles d'un autre réseau portent son nom.
+     */
+    private fun snapshotSource(networkId: String?, networkName: String?): String =
+        if (networkId == null || Networks.isIdfm(networkId)) TraceoClient.SOURCE_DETAIL else NetworkMentions.sourceDetail(networkName)
+
+    /**
      * Modèle du format À proximité. Sa couleur suit le thème du système, et son contenu vient de
      * plusieurs lignes : il a donc son propre état.
      *
      * @param night vrai si le système est en thème sombre
+     * @param networkName nom du réseau des lignes affichées, hors Île-de-France
+     * @param uncovered vrai si la dernière position fiable est hors de tout réseau
      */
     fun buildProximity(
         config: WidgetConfig?,
@@ -608,6 +687,8 @@ object WidgetModels {
         now: Long,
         night: Boolean,
         autoHint: AutoHint? = null,
+        networkName: String? = null,
+        uncovered: Boolean = false,
     ): WidgetModel {
         val format = WidgetFormat.PROXIMITE
         val palette = Palettes.resolve(if (night) WidgetTheme.DARK else WidgetTheme.LIGHT, format, null)
@@ -618,9 +699,11 @@ object WidgetModels {
         }
         val notice = when {
             config == null -> Notice(NoticeKind.NOT_CONFIGURED)
+            uncovered -> Notice(NoticeKind.NO_NETWORK)
             rows.isNotEmpty() -> null
             state == null -> Notice(NoticeKind.LOADING)
             state.error != null -> Notice(NoticeKind.ERROR, state.error)
+            RefreshSchedule.awaitsWake(state.wakeAt, now) -> Notice(NoticeKind.LOADING)
             else -> Notice(NoticeKind.NO_DEPARTURE)
         }
         val snapshot = state?.takeIf { it.isSnapshot }
@@ -644,7 +727,12 @@ object WidgetModels {
             refreshing = refreshing,
             notice = notice,
             sourceLabel = if (snapshot != null && !quiet) TraceoClient.SOURCE_NAME else null,
-            sourceDetail = if (snapshot != null && !quiet) TraceoClient.SOURCE_DETAIL else null,
+            sourceDetail = if (snapshot != null && !quiet) {
+                // Le réseau du format est celui de ses lignes, toutes relevées au même endroit.
+                snapshotSource(state?.entries?.firstOrNull()?.nearby?.line?.networkId ?: config?.networkId, networkName)
+            } else {
+                null
+            },
             liveSource = if (snapshot == null && !quiet && shownAt > 0L) PrimClient.SOURCE_NAME else null,
             oldSnapshot = snapshot?.fresh == false && !quiet,
             autoHint = hint?.label,
@@ -662,14 +750,26 @@ object WidgetModels {
             badgeBg = background,
             badgeFg = foreground,
             place = "${entry.nearby.stopName} · ${formatDistance(entry.nearby.distanceM)}",
-            directions = WidgetContent.proximityDirections(passages, line.id, entry.nearby.stopName),
+            // L'ordre réel du RER A ne concerne que l'Île-de-France : ailleurs, le sens publié suffit.
+            directions = WidgetContent.proximityDirections(
+                passages, if (Networks.isIdfm(line.networkId)) line.id else "", entry.nearby.stopName,
+            ),
             line = line,
         )
     }
 
+    /** Message d'un widget dont la ligne n'a pas de temps réel, à la place de « Aucun passage ». */
+    const val NO_REALTIME = "Pas de temps réel sur cette ligne"
+
     private fun badgeOf(line: Line): LineBadge {
         val raw = line.shortName.trim().ifEmpty { line.name.trim() }
-        val label = (if (line.isRer()) raw.removePrefix("RER").trim().ifEmpty { raw } else raw).take(7)
+        if (!Networks.isIdfm(line.networkId)) {
+            // Hors Île-de-France, une même pastille pour tous les modes : le rond du métro et les
+            // filets du tram sont le code de formes francilien. Les codes y sont parfois longs.
+            val label = BadgeLabels.label(raw)
+            return LineBadge(label, BadgeShape.BUS, BadgeLabels.textScale(label), raw)
+        }
+        val label = (if (line.isRer()) raw.removePrefix("RER").trim().ifEmpty { raw } else raw).take(BadgeLabels.MAX_LENGTH)
         val shape = when {
             line.mode == "metro" || line.isRer() -> BadgeShape.CIRCLE
             line.mode == "rail" -> BadgeShape.SQUARE

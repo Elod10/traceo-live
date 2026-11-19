@@ -17,7 +17,9 @@ import kotlin.math.roundToInt
 
 // Index local des arrêts : tout l'open data utile au mode automatique, dans un fichier du téléphone.
 // La recherche des arrêts proches se fait donc sans réseau, sans quota, et la position ne quitte pas
-// l'appareil. Ce fichier n'utilise aucune API Android afin d'être testable sur JVM.
+// l'appareil. L'index de l'Île-de-France est construit par le téléphone à partir de l'open data IDFM ;
+// celui d'un autre réseau arrive compilé de Tracéo, et prend la même forme de fichier.
+// Ce fichier n'utilise aucune API Android afin d'être testable sur JVM.
 
 /** Un point d'arrêt de l'index. [zone] est la zone comprise par Tracéo et par PRIM. */
 data class IndexedStop(
@@ -31,6 +33,16 @@ data class IndexedStop(
 
 /** Les arrêts d'un secteur, avec la description de leurs lignes. */
 class StopIndexArea(val lines: Map<String, Line>, val stops: List<IndexedStop>)
+
+/** L'index des arrêts d'un réseau, tel que Tracéo le compile (`/api/reseaux/{id}/index`). */
+class NetworkIndex(
+    /** Date de compilation des horaires dont il est tiré. */
+    val builtAt: Long?,
+    val lines: List<Line>,
+    val stops: List<IndexedStop>,
+    /** Entrées écartées : arrêt sans coordonnées, sans nom ou sans ligne connue. */
+    val skipped: Int,
+)
 
 /** Lecture de CSV au fil de l'eau : séparateur « ; », guillemets possibles, BOM en tête toléré. */
 object Csv {
@@ -180,9 +192,29 @@ object StopIndexFile {
         null
     }
 
-    /** Arrêts situés dans le carré de côté 2 × [radiusM] autour du point : les autres sont sautés. */
+    /**
+     * Arrêts situés dans le carré de côté 2 × [radiusM] autour du point : les autres sont sautés.
+     *
+     * @param networkId réseau du fichier, que portent ses lignes : il n'y est pas écrit, un fichier
+     *        ne contenant qu'un réseau
+     */
     @Throws(IOException::class)
-    fun around(input: InputStream, lat: Double, lon: Double, radiusM: Int): StopIndexArea {
+    fun around(input: InputStream, lat: Double, lon: Double, radiusM: Int, networkId: String = Networks.IDFM): StopIndexArea {
+        val dLat = radiusM / METERS_PER_DEGREE
+        val dLon = radiusM / (METERS_PER_DEGREE * cos(Math.toRadians(lat)).coerceAtLeast(0.01))
+        val minLat = ((lat - dLat) * COORD_SCALE).toInt()
+        val maxLat = ((lat + dLat) * COORD_SCALE).toInt()
+        val minLon = ((lon - dLon) * COORD_SCALE).toInt()
+        val maxLon = ((lon + dLon) * COORD_SCALE).toInt()
+        return read(input, networkId) { stopLat, stopLon -> stopLat in minLat..maxLat && stopLon in minLon..maxLon }
+    }
+
+    /** Tous les arrêts du fichier : pour situer les arrêts d'une ligne, pas pour chercher autour d'un point. */
+    @Throws(IOException::class)
+    fun all(input: InputStream, networkId: String = Networks.IDFM): StopIndexArea = read(input, networkId) { _, _ -> true }
+
+    /** @param wanted vrai pour un arrêt à garder, d'après sa latitude et sa longitude entières */
+    private inline fun read(input: InputStream, networkId: String, wanted: (Int, Int) -> Boolean): StopIndexArea {
         val data = DataInputStream(BufferedInputStream(input))
         if (data.readInt() != MAGIC || data.readInt() != VERSION) throw IOException("Index d'arrêts illisible")
         data.readLong()
@@ -201,23 +233,17 @@ object StopIndexFile {
                     operator = values[6].ifEmpty { null },
                     color = values[7].ifEmpty { null },
                     textColor = values[8].ifEmpty { null },
+                    networkId = networkId,
                 ),
             )
         }
-        val dLat = radiusM / METERS_PER_DEGREE
-        val dLon = radiusM / (METERS_PER_DEGREE * cos(Math.toRadians(lat)).coerceAtLeast(0.01))
-        val minLat = ((lat - dLat) * COORD_SCALE).toInt()
-        val maxLat = ((lat + dLat) * COORD_SCALE).toInt()
-        val minLon = ((lon - dLon) * COORD_SCALE).toInt()
-        val maxLon = ((lon + dLon) * COORD_SCALE).toInt()
-
         val stops = ArrayList<IndexedStop>()
         val usedLines = HashMap<String, Line>()
         repeat(data.readInt()) {
             val stopLat = data.readInt()
             val stopLon = data.readInt()
             val size = data.readUnsignedShort()
-            if (stopLat !in minLat..maxLat || stopLon !in minLon..maxLon) {
+            if (!wanted(stopLat, stopLon)) {
                 skipFully(data, size)
                 return@repeat
             }
@@ -248,8 +274,54 @@ object StopIndexFile {
     }
 }
 
-/** Le fichier d'index sur le téléphone : téléchargement, mise à jour et lecture. */
-class StopIndexStore(private val file: File) {
+/** Les fichiers d'index du téléphone : un par réseau. Celui de l'Île-de-France garde son nom d'avant les réseaux. */
+object StopIndexFiles {
+    private const val IDFM_FILE = "stop_index.bin"
+    private const val PREFIX = "stop_index_"
+    private const val SUFFIX = ".bin"
+
+    fun nameOf(networkId: String): String = if (Networks.isIdfm(networkId)) IDFM_FILE else PREFIX + networkId + SUFFIX
+
+    /** Le réseau hors Île-de-France dont ce fichier est l'index, ou null si ce n'en est pas un. */
+    fun networkOf(fileName: String): String? =
+        fileName.takeIf { it.startsWith(PREFIX) && it.endsWith(SUFFIX) }
+            ?.removePrefix(PREFIX)?.removeSuffix(SUFFIX)
+            ?.takeIf { Networks.isValidId(it) && !Networks.isIdfm(it) }
+}
+
+/**
+ * Quels index garder. Un widget qui suit la position télécharge l'index de chaque ville où il passe :
+ * sans ménage, le téléphone les garderait tous, et les renouvellerait à chaque nouvelle publication
+ * d'horaires, pour des villes quittées depuis longtemps.
+ */
+object IndexRetention {
+
+    /** Durée pendant laquelle l'index d'un réseau quitté reste sur le téléphone, au cas où l'on y revienne. */
+    const val KEEP_UNUSED_MS = 30L * 24 * 60 * 60 * 1000
+
+    /**
+     * Vrai si l'index d'un réseau hors Île-de-France reste sur le téléphone : un widget posé s'y
+     * trouve, ou bien son réseau est au catalogue et l'index a servi récemment à chercher des arrêts.
+     * Supprimé, il sera retéléchargé au retour dans la ville. L'index d'un widget posé reste même
+     * si son réseau manque au catalogue : un catalogue vide par accident ne doit pas tout emporter.
+     *
+     * @param usedAt dernière fois que l'index a servi, 0 si elle n'a jamais été notée
+     */
+    fun keeps(inCatalog: Boolean, hasWidget: Boolean, usedAt: Long, now: Long): Boolean =
+        hasWidget || (inCatalog && usedAt > 0L && now - usedAt < KEEP_UNUSED_MS)
+}
+
+/**
+ * Le fichier d'index d'un réseau sur le téléphone : téléchargement, mise à jour et lecture.
+ *
+ * @param networkId réseau de l'index ; celui de l'Île-de-France est construit ici, les autres
+ *        viennent de [networkIndex]
+ */
+class StopIndexStore(
+    private val file: File,
+    private val networkId: String = Networks.IDFM,
+    private val networkIndex: (String) -> NetworkIndex = { TraceoClient().index(it) },
+) {
 
     fun savedAt(): Long? {
         if (!file.exists()) return null
@@ -266,9 +338,60 @@ class StopIndexStore(private val file: File) {
         return now - saved >= if (unmetered) REFRESH_UNMETERED_MS else REFRESH_METERED_MS
     }
 
-    /** Remplace l'index. En cas d'échec, le fichier précédent reste en place. */
+    /**
+     * Vrai si l'index d'un réseau du catalogue est à recharger : absent, ou tiré d'horaires plus
+     * anciens que ceux que le catalogue annonce ([Network.indexAt]).
+     */
+    fun isOutdated(indexAt: Long?): Boolean {
+        val saved = savedAt() ?: return true
+        return indexAt != null && indexAt > saved
+    }
+
+    /**
+     * Remplace l'index. En cas d'échec, le fichier précédent reste en place.
+     *
+     * @param indexAt date des horaires que le catalogue annonce pour ce réseau, hors Île-de-France
+     */
     @Throws(IOException::class)
-    fun download(now: Long = System.currentTimeMillis()): StopIndexBuilder.Stats = synchronized(LOCK) {
+    fun download(now: Long = System.currentTimeMillis(), indexAt: Long? = null): StopIndexBuilder.Stats =
+        if (Networks.isIdfm(networkId)) downloadOpenData(now) else downloadFromTraceo(now, indexAt)
+
+    /**
+     * Recharge l'index d'un réseau du catalogue s'il est périmé ; vrai s'il a été rechargé. Le
+     * contrôle se refait une fois le verrou pris : un autre fil a pu le recharger entre-temps.
+     */
+    @Throws(IOException::class)
+    fun downloadIfOutdated(indexAt: Long?, now: Long = System.currentTimeMillis()): Boolean = synchronized(LOCK) {
+        if (!isOutdated(indexAt)) return false
+        download(now, indexAt)
+        true
+    }
+
+    /**
+     * L'index d'un autre réseau, compilé par Tracéo : il est daté de ses horaires, pas du téléchargement.
+     * Il n'est jamais daté d'avant ce que le catalogue annonçait en le demandant : si les deux dates
+     * de Tracéo s'écartent un peu, l'index ne doit pas paraître périmé, et être retéléchargé, à chaque fois.
+     */
+    private fun downloadFromTraceo(now: Long, indexAt: Long?): StopIndexBuilder.Stats = synchronized(LOCK) {
+        val index = networkIndex(networkId)
+        if (index.stops.isEmpty()) throw IOException("Aucun arrêt dans les données reçues")
+        file.parentFile?.mkdirs()
+        val tmp = File(file.parentFile, file.name + ".tmp")
+        try {
+            val datedAt = maxOf(index.builtAt ?: now, indexAt ?: 0L)
+            tmp.outputStream().use { StopIndexFile.write(it, datedAt, index.lines, index.stops) }
+            if (!tmp.renameTo(file)) {
+                file.delete()
+                if (!tmp.renameTo(file)) throw IOException("Écriture de l'index impossible")
+            }
+            StopIndexBuilder.Stats(index.stops.size, index.lines.size, index.skipped)
+        } finally {
+            tmp.delete()
+        }
+    }
+
+    /** L'index de l'Île-de-France, construit par le téléphone à partir de l'open data IDFM. */
+    private fun downloadOpenData(now: Long): StopIndexBuilder.Stats = synchronized(LOCK) {
         val lines = Referential.downloadLines(ALL_MODES)
         if (lines.isEmpty()) throw IOException("Référentiel des lignes vide")
         file.parentFile?.mkdirs()
@@ -304,11 +427,21 @@ class StopIndexStore(private val file: File) {
         Http.stream(url) { input -> target.outputStream().use { input.copyTo(it) } }
     }
 
+    /** Tous les arrêts de l'index, ou null s'il n'existe pas encore ou ne se lit plus. */
+    fun all(): StopIndexArea? {
+        if (!file.exists()) return null
+        return try {
+            file.inputStream().use { StopIndexFile.all(it, networkId) }
+        } catch (e: IOException) {
+            null
+        }
+    }
+
     /** Arrêts autour du point, ou null si l'index n'existe pas encore ou ne se lit plus. */
     fun around(lat: Double, lon: Double, radiusM: Int): StopIndexArea? {
         if (!file.exists()) return null
         return try {
-            file.inputStream().use { StopIndexFile.around(it, lat, lon, radiusM) }
+            file.inputStream().use { StopIndexFile.around(it, lat, lon, radiusM, networkId) }
         } catch (e: IOException) {
             null
         }
@@ -320,6 +453,6 @@ class StopIndexStore(private val file: File) {
         private const val REFRESH_UNMETERED_MS = 7 * DAY_MS
         private const val REFRESH_METERED_MS = 30 * DAY_MS
 
-        val ALL_MODES: List<String> = TransportMode.entries.flatMap { it.apiModes }.distinct()
+        val ALL_MODES: List<String> = TransportMode.IDFM.flatMap { it.apiModes }.distinct()
     }
 }

@@ -52,10 +52,15 @@ class Prefs(context: Context) {
     /** Vrai si les passages viennent de PRIM en direct : une clé, et du quota pour aujourd'hui. */
     val usesPrim: Boolean get() = hasApiKey && !primPaused
 
-    /** Dernière date annoncée par Tracéo pour son prochain relevé (`nextAt`), 0 si inconnue. */
-    var traceoNextAt: Long
-        get() = settings.getLong(KEY_TRACEO_NEXT_AT, 0L)
-        set(value) = settings.edit().putLong(KEY_TRACEO_NEXT_AT, value).apply()
+    /**
+     * Dernière date annoncée par Tracéo pour le prochain relevé d'un réseau (`nextAt`), 0 si inconnue.
+     * Chaque réseau est relevé à sa cadence : l'annonce de l'un ne vaut pas pour un autre.
+     */
+    fun traceoNextAt(networkId: String = Networks.IDFM): Long =
+        settings.getLong(DataSources.nextAtPreference(networkId), 0L)
+
+    fun setTraceoNextAt(networkId: String, value: Long) =
+        settings.edit().putLong(DataSources.nextAtPreference(networkId), value).apply()
 
     /**
      * Décalage propre à cette installation, tiré une fois pour toutes : les téléphones n'interrogent
@@ -70,6 +75,27 @@ class Prefs(context: Context) {
             settings.edit().putLong(KEY_REFRESH_OFFSET, drawn).apply()
             return drawn
         }
+
+    /** Dernière fois que l'index d'un réseau a servi à chercher des arrêts autour de l'usager ; 0 si jamais. */
+    fun indexUsedAt(networkId: String): Long = settings.getLong(KEY_INDEX_USED + networkId, 0L)
+
+    /** Note que l'index du réseau vient de servir. Une fois par jour suffit : c'est en semaines qu'il s'oublie. */
+    fun markIndexUsed(networkId: String, now: Long) {
+        if (now - indexUsedAt(networkId) in 0 until INDEX_USE_STEP_MS) return
+        settings.edit().putLong(KEY_INDEX_USED + networkId, now).apply()
+    }
+
+    fun forgetIndexUse(networkId: String) = settings.edit().remove(KEY_INDEX_USED + networkId).apply()
+
+    /** Dernier ménage des index des réseaux quittés : une fois par jour suffit. */
+    var indexPrunedAt: Long
+        get() = settings.getLong(KEY_INDEX_PRUNED, 0L)
+        set(value) = settings.edit().putLong(KEY_INDEX_PRUNED, value).apply()
+
+    /** Réseau du dernier widget enregistré : il est proposé d'avance au suivant. Null si aucun. */
+    var lastNetwork: String?
+        get() = settings.getString(KEY_LAST_NETWORK, null)
+        set(value) = settings.edit().putString(KEY_LAST_NETWORK, value).apply()
 
     /** Intervalle d'actualisation automatique en minutes (0 = manuel uniquement). */
     var refreshMinutes: Int
@@ -185,15 +211,15 @@ class Prefs(context: Context) {
         editor.apply()
     }
 
-    /** Lignes favorites du mode automatique. */
+    /** Lignes favorites du mode automatique, par leur clé ([Line.key]), qui porte le réseau hors Île-de-France. */
     val favoriteLines: Set<String>
         get() = settings.getStringSet(KEY_FAVORITE_LINES, null)?.toSet().orEmpty()
 
     /** Ajoute ou retire une ligne des favoris. Renvoie vrai si elle est maintenant favorite. */
-    fun toggleFavoriteLine(lineId: String): Boolean {
+    fun toggleFavoriteLine(lineKey: String): Boolean {
         val current = favoriteLines
-        val favorite = lineId !in current
-        val next = if (favorite) current + lineId else current - lineId
+        val favorite = lineKey !in current
+        val next = if (favorite) current + lineKey else current - lineKey
         settings.edit().putStringSet(KEY_FAVORITE_LINES, next).apply()
         return favorite
     }
@@ -256,8 +282,11 @@ class Prefs(context: Context) {
         private const val KEY_TILE_WIDGET = "tile_widget"
         private const val KEY_TILE_ADDED = "tile_added"
         private const val KEY_PRIM_USAGE = "prim_usage"
-        private const val KEY_TRACEO_NEXT_AT = "traceo_next_at"
         private const val KEY_REFRESH_OFFSET = "refresh_offset_ms"
+        private const val KEY_LAST_NETWORK = "last_network"
+        private const val KEY_INDEX_USED = "index_used_"
+        private const val KEY_INDEX_PRUNED = "index_pruned_at"
+        private const val INDEX_USE_STEP_MS = 24L * 60 * 60 * 1000
         private val usageLock = Any()
         const val DEFAULT_REFRESH_MINUTES = 2
         val REFRESH_CHOICES = listOf(0, 1, 2, 5, 10)
