@@ -500,6 +500,36 @@ class WidgetContentTest {
         assertEquals(NoticeKind.ERROR, model(config(metro, allDirections), state(error = "Panne")).notice?.kind)
     }
 
+    /** Un réseau qui se réveille n'a pas encore de relevé : le widget charge, il ne dit pas « Aucun passage ». */
+    @Test
+    fun aWakingNetworkShowsLoadingInsteadOfNoDeparture() {
+        val bus = Line("204", "Saint Thibault Vers Bucheres", "2B", "bus", networkId = "tcat")
+        val stop = Stop("Patton", null, listOf("1:PATTO"), "tcat")
+        val config = WidgetConfig(1, TransportMode.BUS, bus, stop, mapOf("1:PATTO" to emptySet()), "")
+        val wakeAt = now + 4_000L
+        val waking = WidgetState(
+            fetchedAt = now, attemptedAt = now, departures = emptyList(), error = null, dataAt = null, fresh = false, wakeAt = wakeAt,
+        )
+        fun notice(state: WidgetState, at: Long = now) = WidgetModels.build(
+            config, state, hasApiKey = false, refreshing = false, widthDp = 348f, heightDp = 192f, now = at,
+        ).notice?.kind
+
+        assertEquals(NoticeKind.LOADING, notice(waking))
+        // Sans réveil attendu, ou une fois son délai passé (écran resté éteint), c'est « Aucun passage ».
+        assertEquals(NoticeKind.NO_DEPARTURE, notice(waking.copy(wakeAt = null)))
+        assertEquals(NoticeKind.NO_DEPARTURE, notice(waking, at = wakeAt + RefreshSchedule.WAKE_GRACE_MS + 1L))
+        // Une erreur se dit, et des passages se montrent, réveil ou non.
+        assertEquals(NoticeKind.ERROR, notice(waking.copy(error = "Panne")))
+        assertNull(notice(waking.copy(departures = listOf(dep("Gare Jardins", 4, stopId = "1:PATTO")))))
+
+        val proximity = ProximityState(fetchedAt = now, attemptedAt = now, entries = emptyList(), dataAt = null, fresh = false, wakeAt = wakeAt)
+        fun proximityNotice(state: ProximityState) = WidgetModels.buildProximity(
+            config, state, refreshing = false, widthDp = 348f, heightDp = 192f, now = now, night = true,
+        ).notice?.kind
+        assertEquals(NoticeKind.LOADING, proximityNotice(proximity))
+        assertEquals(NoticeKind.NO_DEPARTURE, proximityNotice(proximity.copy(wakeAt = null)))
+    }
+
     // --- Source des données -------------------------------------------------------------------
 
     private val traceoStop = "stop_area:IDFM:71673"
