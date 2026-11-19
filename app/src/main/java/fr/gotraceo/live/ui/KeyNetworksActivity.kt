@@ -9,15 +9,14 @@ import android.widget.TextView
 import fr.gotraceo.live.R
 import fr.gotraceo.live.data.DataSources
 import fr.gotraceo.live.data.Network
-import fr.gotraceo.live.data.NetworkMentions
 import fr.gotraceo.live.data.Prefs
 import fr.gotraceo.live.widget.QuotaAlerts
 import fr.gotraceo.live.widget.Sources
 
 /**
  * Choix du réseau d'une clé API, ouvert depuis les réglages quand Tracéo propose d'autres réseaux.
- * Seule l'Île-de-France en accepte une aujourd'hui (PRIM) : les autres réseaux figurent dans la liste
- * avec la raison pour laquelle il n'y a rien à demander.
+ * Seuls les réseaux qui acceptent une clé personnelle y figurent : aujourd'hui l'Île-de-France (PRIM).
+ * Une phrase dit pourquoi il n'y a rien à demander pour tous les autres, quel que soit leur nombre.
  */
 class KeyNetworksActivity : Activity() {
 
@@ -49,21 +48,11 @@ class KeyNetworksActivity : Activity() {
     override fun onResume() {
         super.onResume()
         // Au retour de l'écran de la clé PRIM, la clé a pu être ajoutée ou retirée.
-        val networks = Sources.catalog(this).read().networks
+        val networks = Sources.catalog(this).read().networks.filter(DataSources::acceptsPersonalKey)
         adapter.setItems(networks.mapIndexed { index, network -> row(network, RowStyle.inGroup(index, networks.size)) })
     }
 
     private fun row(network: Network, style: RowStyle): RowItem {
-        if (!DataSources.acceptsPersonalKey(network)) {
-            // Lisible mais inerte : l'explication compte autant que le choix.
-            return RowItem(
-                title = NetworkMentions.title(network),
-                subtitle = getString(R.string.key_network_open, network.name),
-                style = style,
-                enabled = false,
-                payload = network,
-            )
-        }
         val status = if (prefs.hasApiKey) {
             val usage = prefs.primUsage()
             getString(R.string.settings_key_usage, QuotaAlerts.number(usage.used), QuotaAlerts.number(usage.quota))
