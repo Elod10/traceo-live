@@ -70,8 +70,50 @@ class RowItem(
     /** Texte supplémentaire pris en compte par la recherche. */
     val searchExtra: String = "",
     val payload: Any? = null,
+    /**
+     * Ce qui se cherche de la ligne, à la place de son titre et de son sous-titre ; null pour les
+     * chercher tous deux. Vide, la ligne disparaît dès qu'un texte est saisi : c'est une action, pas
+     * un résultat.
+     */
+    searchOnly: String? = null,
 ) {
-    val searchText: String = normalizeLabel("$title ${subtitle.orEmpty()} $searchExtra")
+    val searchText: String = normalizeLabel(searchOnly ?: "$title ${subtitle.orEmpty()} $searchExtra")
+}
+
+/** Recherche dans une liste : chaque mot tapé doit se retrouver, sans égard aux accents ni à la casse. */
+object RowSearch {
+
+    fun words(query: String): List<String> = normalizeLabel(query).split(' ').filter { it.isNotEmpty() }
+
+    fun filter(items: List<RowItem>, query: String): List<RowItem> {
+        val words = words(query)
+        return if (words.isEmpty()) items else items.filter { item -> words.all { item.searchText.contains(it) } }
+    }
+
+    /**
+     * Présentation des lignes restantes. Une carte dont la recherche retire des lignes doit rester une
+     * carte : ses lignes voisines se regroupent, et celle qui se retrouve seule reprend ses coins.
+     */
+    fun styles(visible: List<RowItem>, filtered: Boolean): List<RowStyle> {
+        if (!filtered) return visible.map { it.style }
+        fun grouped(item: RowItem) =
+            item.style == RowStyle.GROUP_TOP || item.style == RowStyle.GROUP_MIDDLE || item.style == RowStyle.GROUP_BOTTOM
+        val styles = ArrayList<RowStyle>(visible.size)
+        var start = 0
+        while (start < visible.size) {
+            if (!grouped(visible[start])) {
+                styles += visible[start].style
+                start++
+                continue
+            }
+            var end = start
+            while (end + 1 < visible.size && grouped(visible[end + 1])) end++
+            val size = end - start + 1
+            for (index in 0 until size) styles += RowStyle.inGroup(index, size)
+            start = end + 1
+        }
+        return styles
+    }
 }
 
 /**
@@ -86,6 +128,7 @@ class RowAdapter(private val context: Context, private val cells: Boolean = fals
     private val density = context.resources.displayMetrics.density
     private var all: List<RowItem> = emptyList()
     private var visible: List<RowItem> = emptyList()
+    private var styles: List<RowStyle> = emptyList()
     private var query: String = ""
 
     fun setItems(items: List<RowItem>) {
@@ -94,15 +137,15 @@ class RowAdapter(private val context: Context, private val cells: Boolean = fals
     }
 
     fun filter(text: String) {
-        query = normalizeLabel(text)
+        query = text
         applyFilter()
     }
 
     val items: List<RowItem> get() = all
 
     private fun applyFilter() {
-        val words = query.split(' ').filter { it.isNotEmpty() }
-        visible = if (words.isEmpty()) all else all.filter { item -> words.all { item.searchText.contains(it) } }
+        visible = RowSearch.filter(all, query)
+        styles = RowSearch.styles(visible, filtered = visible.size != all.size)
         notifyDataSetChanged()
     }
 
@@ -127,7 +170,7 @@ class RowAdapter(private val context: Context, private val cells: Boolean = fals
     private fun rowView(position: Int, convertView: View?, parent: ViewGroup): View {
         val view = convertView ?: inflater.inflate(R.layout.item_row, parent, false)
         val item = getItem(position)
-        val style = item.style
+        val style = styles[position]
 
         val root = view.findViewById<View>(R.id.row_root)
         root.setPaddingRelative(root.paddingStart, dp(if (style.startsBlock && position > 0) 10 else 0), root.paddingEnd, 0)
@@ -144,7 +187,7 @@ class RowAdapter(private val context: Context, private val cells: Boolean = fals
         val hasIcon = item.badge != null || item.chip != null || item.iconRes != null
         val divider = view.findViewById<View>(R.id.row_divider)
         val showDivider = when (style) {
-            RowStyle.PLAIN -> position > 0 && getItem(position - 1).style == RowStyle.PLAIN
+            RowStyle.PLAIN -> position > 0 && styles[position - 1] == RowStyle.PLAIN
             RowStyle.GROUP_MIDDLE, RowStyle.GROUP_BOTTOM -> true
             else -> false
         }
@@ -224,7 +267,7 @@ class RowAdapter(private val context: Context, private val cells: Boolean = fals
     }
 
     private fun badgeFor(line: Line, heightDp: Float): Bitmap {
-        val key = "${line.mode}|${line.shortName}|${line.color}|${line.textColor}|$heightDp"
+        val key = "${line.networkId}|${line.mode}|${line.shortName}|${line.color}|${line.textColor}|$heightDp"
         return badgeCache.get(key) ?: BadgeRenderer.render(context, line, heightDp).also { badgeCache.put(key, it) }
     }
 
