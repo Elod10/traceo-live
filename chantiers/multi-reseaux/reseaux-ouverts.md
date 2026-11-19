@@ -326,6 +326,43 @@ enregistrées conformes au chapitre 5.
   pas ses quais, le quai le plus proche : donc un seul sens, selon le trottoir où l'on se tient,
   tant que Tracéo ne regroupe pas les quais (chapitre 5).
 
+### Lot 11 : À proximité et mode automatique à grande échelle
+
+- **Mesure d'un index à l'échelle du plus gros réseau** (7 422 quais, 202 lignes), fabriqué à la
+  forme que sert Tracéo, sur la machine qui lance les tests et non sur un téléphone : réponse de
+  901 Ko ; fichier gardé sur le téléphone de 354 Ko ; téléchargement, décodage et écriture en 0,27 s
+  environ, pour 28 Mo alloués au total pendant l'opération ; recherche autour d'un point en 2 ms, qui
+  ne garde que les quais du voisinage (90 sur 7 422) et saute les autres sans les décoder. Un
+  téléphone sera plusieurs fois plus lent : cela reste loin du temps laissé à un widget. Le
+  téléchargement n'a lieu qu'à l'arrivée dans une ville, puis à chaque nouvelle publication des
+  horaires ; la recherche, à chaque position lue.
+- **Limite du client HTTP.** Il lisait une réponse entière en mémoire, sans borne. Une réponse de
+  plus de 8 Mo, une fois décompressée, est maintenant refusée (pas tronquée) : c'est neuf fois le
+  plus gros index attendu. Le téléphone garde alors ce qu'il avait.
+- **Index des réseaux quittés.** Un widget qui suit la position télécharge l'index de chaque ville
+  où il passe, et le renouvelait ensuite à chaque publication, pour toujours. L'index d'un réseau
+  n'est plus gardé que s'il sert : un widget posé s'y trouve, ou il a servi depuis moins de
+  30 jours (recherche d'arrêts autour de l'usager, ou configuration) et son réseau est au
+  catalogue. Sinon il est supprimé, et sera retéléchargé au retour dans la ville. Le ménage passe
+  une fois par jour au plus, après un toucher d'un widget qui suit la position ou après
+  l'actualisation d'un widget hors Île-de-France. L'index de l'Île-de-France, que le téléphone
+  construit lui-même, n'est pas concerné.
+- **Emprises qui se recouvrent.** Les emprises sont des rectangles : celle d'un réseau étendu peut
+  contenir un coin où il n'a aucun arrêt, et deux réseaux voisins se chevauchent. Le réseau le plus
+  local qui a un arrêt tout près l'emporte toujours. Si son arrêt le plus proche est loin, un réseau
+  plus étendu passe devant quand le sien est plus près de plus de 400 m, la tolérance du
+  classement. Sur ce doute, l'index du réseau étendu est téléchargé s'il vient de Tracéo (une
+  requête légère) ; celui de l'Île-de-France, que le téléphone construit à partir de plusieurs
+  fichiers, n'est lu que s'il est déjà là. Le format À proximité aligne sa configuration sur le
+  réseau de ses lignes à chaque actualisation, pour sa cadence et ses mentions.
+- **Limite.** Le long de la ligne où les deux arrêts sont à 400 m d'écart, un widget qui suit la
+  position peut passer d'un réseau à l'autre d'une lecture à la suivante : rien ne retient le
+  réseau qu'il montrait déjà.
+- **Emprises voisines.** Entre deux emprises qui ne se touchent pas, aucun réseau ne couvre le
+  point : le widget dit « Aucun réseau ici ». À la configuration, le message ne cite plus tous les
+  réseaux couverts, mais le plus proche et sa distance (« Le plus proche : Troyes, à 35,0 km »).
+  La distance est celle du bord de l'emprise du réseau, pas du centre de la ville.
+
 ## 11. Questions à Tracéo
 
 Ce qui manque à l'appli dans le contrat, et qu'elle ne contourne qu'en attendant une réponse.
@@ -337,4 +374,5 @@ Ce qui manque à l'appli dans le contrat, et qu'elle ne contourne qu'en attendan
 | Q4 | Dans la réponse des passages, un indicateur explicite de réveil (par exemple `waking` : vrai), au lieu de le déduire de `fresh` et de `nextAt` | Elle prend pour un réveil toute réponse sans relevé récent dont le `nextAt` est à moins de 20 secondes, et borne ses retours à deux |
 | Q5 | `textColor` nul quand le réseau ne publie pas de couleur de texte, même s'il publie la couleur de la ligne | Hors Île-de-France, elle ne tient pas compte d'un texte noir |
 | Q6 | Quand Tracéo regroupera les quais d'un arrêt, l'arrêt regroupé aura-t-il un identifiant neuf, ou celui d'un des quais ? | Un widget posé sur un quai garde son identifiant : neuf, il demandera à être reconfiguré ; repris d'un quai, il recevra les deux sens sans rien dire |
+| Q7 | `indexAt` ne change-t-il que quand les horaires changent vraiment, ou à chaque compilation ? | Elle recharge lignes, arrêts et index à chaque changement de `indexAt` : s'il change chaque jour, un téléphone télécharge chaque jour l'index de son réseau |
 | Q3 | Dans la réponse des arrêts d'une ligne, de quoi situer un arrêt : ses coordonnées (`lat`, `lon`), ou son rang sur la ligne | Pour distinguer deux arrêts de même nom, elle télécharge l'index entier du réseau |

@@ -76,6 +76,22 @@ class Prefs(context: Context) {
             return drawn
         }
 
+    /** Dernière fois que l'index d'un réseau a servi à chercher des arrêts autour de l'usager ; 0 si jamais. */
+    fun indexUsedAt(networkId: String): Long = settings.getLong(KEY_INDEX_USED + networkId, 0L)
+
+    /** Note que l'index du réseau vient de servir. Une fois par jour suffit : c'est en semaines qu'il s'oublie. */
+    fun markIndexUsed(networkId: String, now: Long) {
+        if (now - indexUsedAt(networkId) in 0 until INDEX_USE_STEP_MS) return
+        settings.edit().putLong(KEY_INDEX_USED + networkId, now).apply()
+    }
+
+    fun forgetIndexUse(networkId: String) = settings.edit().remove(KEY_INDEX_USED + networkId).apply()
+
+    /** Dernier ménage des index des réseaux quittés : une fois par jour suffit. */
+    var indexPrunedAt: Long
+        get() = settings.getLong(KEY_INDEX_PRUNED, 0L)
+        set(value) = settings.edit().putLong(KEY_INDEX_PRUNED, value).apply()
+
     /** Réseau du dernier widget enregistré : il est proposé d'avance au suivant. Null si aucun. */
     var lastNetwork: String?
         get() = settings.getString(KEY_LAST_NETWORK, null)
@@ -268,6 +284,9 @@ class Prefs(context: Context) {
         private const val KEY_PRIM_USAGE = "prim_usage"
         private const val KEY_REFRESH_OFFSET = "refresh_offset_ms"
         private const val KEY_LAST_NETWORK = "last_network"
+        private const val KEY_INDEX_USED = "index_used_"
+        private const val KEY_INDEX_PRUNED = "index_pruned_at"
+        private const val INDEX_USE_STEP_MS = 24L * 60 * 60 * 1000
         private val usageLock = Any()
         const val DEFAULT_REFRESH_MINUTES = 2
         val REFRESH_CHOICES = listOf(0, 1, 2, 5, 10)

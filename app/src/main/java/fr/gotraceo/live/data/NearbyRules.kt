@@ -193,12 +193,20 @@ sealed class NearbyLookup {
 object NearbyNetworks {
 
     /**
-     * Cherche les lignes proches dans les réseaux qui couvrent le point, du plus local au plus étendu,
-     * et s'arrête au premier qui en a.
+     * Cherche les lignes proches dans les réseaux qui couvrent le point, du plus local au plus étendu.
+     *
+     * Les emprises sont des rectangles : elles se recouvrent là où deux réseaux sont voisins, et
+     * l'emprise d'un réseau étendu peut contenir un coin où il n'a aucun arrêt. Le premier réseau
+     * qui a des lignes tout près l'emporte. Si son arrêt le plus proche est loin, un réseau plus
+     * étendu passe devant quand le sien est nettement plus près (de plus que la tolérance du
+     * classement) : sans cela, on verrait les lignes d'un réseau à 1,9 km à côté d'un arrêt d'un autre.
      *
      * @param favorites clés des lignes favorites (cf. [Line.key])
      * @param idfmModes modes acceptés par la source des passages en Île-de-France ; un autre réseau
      *        sert tous les siens
+     * @param wider arrêts d'un réseau plus étendu, consulté une fois des lignes trouvées loin dans un
+     *        réseau plus local : à l'appelant de dire ce qu'il accepte de télécharger sur ce doute.
+     *        Null pour se servir de [area].
      * @param area arrêts d'un réseau autour du point, ou null si son index est indisponible
      */
     fun lookup(
@@ -208,25 +216,38 @@ object NearbyNetworks {
         pickedLineKey: String?,
         nightService: Boolean,
         idfmModes: Set<String>,
+        wider: ((Network) -> StopIndexArea?)? = null,
         area: (Network) -> StopIndexArea?,
     ): NearbyLookup {
         val covering = catalog.covering(point)
+        var found: NearbyLookup.Found? = null
+        var foundM = Int.MAX_VALUE
         var withoutIndex: Network? = null
         var withoutStop: Network? = null
         for (network in covering) {
-            val stops = area(network)
+            val stops = if (found == null) area(network) else (wider ?: area)(network)
             if (stops == null) {
-                withoutIndex = withoutIndex ?: network
-            } else {
-                val candidates = NearbyRules.linesAround(stops, point)
-                val modes = if (network.isIdfm) idfmModes else candidates.mapTo(HashSet()) { it.line.mode }
-                val ranking = NearbyRules.rank(candidates, favorites, pickedLineKey, nightService, modes)
-                if (ranking.list.isNotEmpty()) return NearbyLookup.Found(network, ranking)
-                withoutStop = withoutStop ?: network
+                if (found == null) withoutIndex = withoutIndex ?: network
+                continue
             }
+            val candidates = NearbyRules.linesAround(stops, point)
+            val modes = if (network.isIdfm) idfmModes else candidates.mapTo(HashSet()) { it.line.mode }
+            val ranking = NearbyRules.rank(candidates, favorites, pickedLineKey, nightService, modes)
+            if (ranking.list.isEmpty()) {
+                if (found == null) withoutStop = withoutStop ?: network
+                continue
+            }
+            val nearestM = ranking.list.minOf { it.nearby.distanceM }
+            if (found == null || nearestM + NearbyRules.TOLERANCE_M < foundM) {
+                found = NearbyLookup.Found(network, ranking)
+                foundM = nearestM
+            }
+            // Aucun réseau plus étendu ne peut être plus près de toute la tolérance : inutile de les lire.
+            if (foundM <= NearbyRules.TOLERANCE_M) break
         }
         // Un index manquant passe devant : il reste une chance de trouver des arrêts en le téléchargeant.
-        return withoutIndex?.let { NearbyLookup.NoIndex(it) }
+        return found
+            ?: withoutIndex?.let { NearbyLookup.NoIndex(it) }
             ?: withoutStop?.let { NearbyLookup.NoStop(it) }
             ?: NearbyLookup.NoNetwork
     }
@@ -397,11 +418,13 @@ enum class AutoMessage(val label: String, val short: String) {
     NEEDS_ACCESS("Position à autoriser", "GPS ?"),
 }
 
-/** Distance lisible : « 33 m », « 1,1 km ». */
-fun formatDistance(meters: Int): String =
-    if (meters < 1000) {
-        "$meters m"
-    } else {
-        val tenths = min(999, (meters + 50) / 100)
+/** Distance lisible : « 33 m », « 1,1 km », « 140 km ». */
+fun formatDistance(meters: Int): String = when {
+    meters < 1000 -> "$meters m"
+    meters < 99_950 -> {
+        val tenths = (meters + 50) / 100
         "${tenths / 10},${tenths % 10} km"
     }
+    // Au-delà, le dixième de kilomètre ne dit plus rien : c'est la distance à une autre ville.
+    else -> "${(meters + 500) / 1000} km"
+}

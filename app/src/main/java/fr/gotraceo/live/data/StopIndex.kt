@@ -274,6 +274,43 @@ object StopIndexFile {
     }
 }
 
+/** Les fichiers d'index du téléphone : un par réseau. Celui de l'Île-de-France garde son nom d'avant les réseaux. */
+object StopIndexFiles {
+    private const val IDFM_FILE = "stop_index.bin"
+    private const val PREFIX = "stop_index_"
+    private const val SUFFIX = ".bin"
+
+    fun nameOf(networkId: String): String = if (Networks.isIdfm(networkId)) IDFM_FILE else PREFIX + networkId + SUFFIX
+
+    /** Le réseau hors Île-de-France dont ce fichier est l'index, ou null si ce n'en est pas un. */
+    fun networkOf(fileName: String): String? =
+        fileName.takeIf { it.startsWith(PREFIX) && it.endsWith(SUFFIX) }
+            ?.removePrefix(PREFIX)?.removeSuffix(SUFFIX)
+            ?.takeIf { Networks.isValidId(it) && !Networks.isIdfm(it) }
+}
+
+/**
+ * Quels index garder. Un widget qui suit la position télécharge l'index de chaque ville où il passe :
+ * sans ménage, le téléphone les garderait tous, et les renouvellerait à chaque nouvelle publication
+ * d'horaires, pour des villes quittées depuis longtemps.
+ */
+object IndexRetention {
+
+    /** Durée pendant laquelle l'index d'un réseau quitté reste sur le téléphone, au cas où l'on y revienne. */
+    const val KEEP_UNUSED_MS = 30L * 24 * 60 * 60 * 1000
+
+    /**
+     * Vrai si l'index d'un réseau hors Île-de-France reste sur le téléphone : un widget posé s'y
+     * trouve, ou bien son réseau est au catalogue et l'index a servi récemment à chercher des arrêts.
+     * Supprimé, il sera retéléchargé au retour dans la ville. L'index d'un widget posé reste même
+     * si son réseau manque au catalogue : un catalogue vide par accident ne doit pas tout emporter.
+     *
+     * @param usedAt dernière fois que l'index a servi, 0 si elle n'a jamais été notée
+     */
+    fun keeps(inCatalog: Boolean, hasWidget: Boolean, usedAt: Long, now: Long): Boolean =
+        hasWidget || (inCatalog && usedAt > 0L && now - usedAt < KEEP_UNUSED_MS)
+}
+
 /**
  * Le fichier d'index d'un réseau sur le téléphone : téléchargement, mise à jour et lecture.
  *

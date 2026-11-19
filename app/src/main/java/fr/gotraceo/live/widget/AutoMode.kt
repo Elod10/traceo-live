@@ -12,6 +12,7 @@ import fr.gotraceo.live.data.AutoState
 import fr.gotraceo.live.data.DataSources
 import fr.gotraceo.live.data.Directions
 import fr.gotraceo.live.data.GeoPoint
+import fr.gotraceo.live.data.IndexRetention
 import fr.gotraceo.live.data.NearbyLine
 import fr.gotraceo.live.data.NearbyLookup
 import fr.gotraceo.live.data.NearbyNetworks
@@ -27,6 +28,8 @@ import fr.gotraceo.live.data.Prefs
 import fr.gotraceo.live.data.Proximity
 import fr.gotraceo.live.data.ProximityState
 import fr.gotraceo.live.data.RefreshSchedule
+import fr.gotraceo.live.data.StopIndexArea
+import fr.gotraceo.live.data.StopIndexFiles
 import fr.gotraceo.live.data.StopIndexStore
 import fr.gotraceo.live.data.TransportMode
 import fr.gotraceo.live.data.WidgetConfig
@@ -55,9 +58,8 @@ import java.util.concurrent.ConcurrentHashMap
 object AutoMode {
 
     private const val TAG = "TRWidget"
-    private const val INDEX_FILE = "stop_index.bin"
-    private const val NETWORK_INDEX_PREFIX = "stop_index_"
-    private const val INDEX_SUFFIX = ".bin"
+
+    private const val PRUNE_EVERY_MS = 24L * 60 * 60 * 1000
 
     /** Attente la plus longue du premier relevé d'un réseau qui se réveille, avant de choisir une ligne. */
     private const val MAX_WAKE_WAIT_MS = 10_000L
@@ -72,10 +74,8 @@ object AutoMode {
     fun store(context: Context): StopIndexStore = store(context, Networks.IDFM)
 
     /** L'index des arrêts d'un réseau. Celui de l'Île-de-France garde son fichier d'avant les réseaux. */
-    fun store(context: Context, networkId: String): StopIndexStore {
-        val name = if (Networks.isIdfm(networkId)) INDEX_FILE else NETWORK_INDEX_PREFIX + networkId + INDEX_SUFFIX
-        return StopIndexStore(File(context.applicationContext.noBackupFilesDir, name), networkId)
-    }
+    fun store(context: Context, networkId: String): StopIndexStore =
+        StopIndexStore(File(context.applicationContext.noBackupFilesDir, StopIndexFiles.nameOf(networkId)), networkId)
 
     /**
      * Lignes proches d'un point, dans le réseau qui le couvre, sans appel réseau : les index sont
@@ -105,6 +105,26 @@ object AutoMode {
     private fun lookup(context: Context, point: GeoPoint, catalog: NetworkCatalog, onDownload: ((Network) -> Unit)?): NearbyLookup {
         val prefs = Prefs(context)
         val paris = Calendar.getInstance(TimeZone.getTimeZone("Europe/Paris"))
+        val now = System.currentTimeMillis()
+        // Lire l'index d'un réseau autour de l'usager, c'est s'en servir : il est gardé tant qu'il sert.
+        fun read(network: Network): StopIndexArea? =
+            store(context, network.id).around(point.lat, point.lon, NearbyRules.READ_RADIUS_M)
+                ?.also { if (!network.isIdfm) prefs.markIndexUsed(network.id, now) }
+        // Télécharge au besoin l'index d'un réseau, puis le lit.
+        fun load(network: Network): StopIndexArea? {
+            val store = store(context, network.id)
+            if (onDownload != null && store.savedAt() == null) {
+                onDownload(network)
+                // Noté avant même d'arriver : le ménage ne doit pas le prendre pour un index abandonné.
+                if (!network.isIdfm) prefs.markIndexUsed(network.id, now)
+                try {
+                    store.download(indexAt = network.indexAt)
+                } catch (e: IOException) {
+                    Log.w(TAG, "Index des arrêts indisponible pour ${network.id}", e)
+                }
+            }
+            return read(network)
+        }
         return NearbyNetworks.lookup(
             catalog = catalog,
             point = point,
@@ -112,20 +132,14 @@ object AutoMode {
             pickedLineKey = prefs.placeChoices.lineAt(point),
             nightService = NearbyRules.isNightService(paris.get(Calendar.HOUR_OF_DAY), paris.get(Calendar.MINUTE)),
             idfmModes = DataSources.modes(prefs.hasApiKey).flatMap { it.apiModes }.toSet(),
-        ) { network ->
-            // Les réseaux sont essayés du plus local au plus étendu : un index n'est téléchargé que
-            // si aucun réseau plus local n'a déjà donné de lignes.
-            val store = store(context, network.id)
-            if (onDownload != null && store.savedAt() == null) {
-                onDownload(network)
-                try {
-                    store.download(indexAt = network.indexAt)
-                } catch (e: IOException) {
-                    Log.w(TAG, "Index des arrêts indisponible pour ${network.id}", e)
-                }
-            }
-            store.around(point.lat, point.lon, NearbyRules.READ_RADIUS_M)
-        }
+            // Des lignes trouvées, mais loin : un réseau plus étendu a peut-être un arrêt tout près.
+            // Son index vient de Tracéo en une requête légère, il est donc téléchargé. Celui de
+            // l'Île-de-France, que le téléphone construit à partir de plusieurs fichiers, n'est lu
+            // sur ce doute que s'il est déjà là.
+            wider = { network -> if (network.isIdfm) read(network) else load(network) },
+            // Les réseaux sont essayés du plus local au plus étendu.
+            area = ::load,
+        )
     }
 
     fun configFor(widgetId: Int, nearby: NearbyLine, theme: WidgetTheme): WidgetConfig {
@@ -342,6 +356,14 @@ object AutoMode {
         val auto = prefs.auto(widgetId)
         val point = auto.anchor ?: auto.last
         val ranked = withContext(Dispatchers.IO) { point?.let { lookupEnsuringIndex(app, it) } }?.rankingOrNull?.list.orEmpty()
+        // Là où deux emprises se recouvrent, le réseau des lignes proches peut changer sans que l'on
+        // ait bougé, quand l'index d'un réseau plus étendu arrive : la configuration le suit, pour sa
+        // cadence et ses mentions. L'actualisation tient déjà le verrou des configurations.
+        val config = prefs.config(widgetId)
+        val first = ranked.firstOrNull()?.nearby
+        if (config != null && first != null && first.line.networkId != config.networkId) {
+            prefs.saveConfig(configFor(widgetId, first, config.theme))
+        }
         val source = Sources.proximity(app)
         val state = Proximity.collect(
             ranked = ranked,
@@ -500,12 +522,44 @@ object AutoMode {
      */
     fun refreshIndexIfStale(context: Context) {
         val app = context.applicationContext
+        // D'abord le ménage : un index qui ne sert plus n'a pas à être renouvelé.
+        pruneIndexes(app)
         val idfm = store(app)
         val metered = app.getSystemService(ConnectivityManager::class.java)?.isActiveNetworkMetered ?: true
         if (idfm.savedAt() != null && idfm.isStale(System.currentTimeMillis(), unmetered = !metered)) refreshIndex(idfm, Networks.ILE_DE_FRANCE)
         Sources.catalog(app).read().others.forEach { network ->
             val store = store(app, network.id)
             if (store.savedAt() != null && store.isOutdated(network.indexAt)) refreshIndex(store, network)
+        }
+    }
+
+    /**
+     * Supprime les index des réseaux quittés : ceux qui ne sont plus au catalogue, et ceux d'aucun
+     * widget posé qui n'ont pas servi depuis des semaines (cf. [IndexRetention]). L'index de
+     * l'Île-de-France, que le téléphone construit lui-même, n'est pas concerné.
+     */
+    fun pruneIndexes(context: Context, now: Long = System.currentTimeMillis()) {
+        val app = context.applicationContext
+        val catalog = Sources.catalog(app).read()
+        // Sans catalogue reçu, on ne sait pas quels réseaux existent : rien n'est supprimé.
+        if (catalog.savedAt <= 0L) return
+        val prefs = Prefs(app)
+        // Une fois par jour : c'est en semaines qu'un index devient inutile.
+        if (now - prefs.indexPrunedAt in 0 until PRUNE_EVERY_MS) return
+        prefs.indexPrunedAt = now
+        val widgetNetworks = WidgetUpdater.widgetIds(app).asList().mapNotNull { prefs.config(it)?.networkId }.toSet()
+        app.noBackupFilesDir.listFiles()?.forEach { file ->
+            val networkId = StopIndexFiles.networkOf(file.name) ?: return@forEach
+            val kept = IndexRetention.keeps(
+                inCatalog = catalog.byId(networkId) != null,
+                hasWidget = networkId in widgetNetworks,
+                usedAt = prefs.indexUsedAt(networkId),
+                now = now,
+            )
+            if (!kept && file.delete()) {
+                prefs.forgetIndexUse(networkId)
+                Log.i(TAG, "Index des arrêts supprimé ($networkId) : réseau quitté")
+            }
         }
     }
 

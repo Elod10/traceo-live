@@ -235,6 +235,15 @@ class NetworkCatalog(others: List<Network> = emptyList(), val savedAt: Long = 0L
             .minWithOrNull(compareBy<Pair<Network, Int>> { it.second }.thenBy { it.first.bbox.extent })
             ?.first
 
+    /**
+     * Le réseau le plus proche d'un point, où qu'il soit, et sa distance en mètres : pour dire, là
+     * où aucun réseau ne passe, lequel est le moins loin. Un réseau coupé ne compte pas.
+     */
+    fun closest(point: GeoPoint): Pair<Network, Int>? =
+        networks.filter { it.status != NetworkStatus.OFF }
+            .map { it to it.bbox.distanceTo(point) }
+            .minWithOrNull(compareBy<Pair<Network, Int>> { it.second }.thenBy { it.first.bbox.extent })
+
     fun toJson(): JSONObject = JSONObject()
         .put("savedAt", savedAt)
         .put("networks", JSONArray().also { array -> others.forEach { array.put(it.toJson()) } })
