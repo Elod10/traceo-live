@@ -86,8 +86,9 @@ class NetworkChoiceTest {
         assertEquals(listOf(TransportMode.BUS), DataSources.modes(tcat, hasKey = true))
 
         val big = network("grand", "Ailleurs", BoundingBox(1.0, 2.0, 3.0, 4.0), "metro", "tram", "rail", "bus", "boat", "cableway")
+        // Du plus structurant au plus rare : le tram passe devant le train, le bateau devant le câble.
         assertEquals(
-            listOf(TransportMode.METRO, TransportMode.TRAIN, TransportMode.TRAM, TransportMode.BUS, TransportMode.OTHER, TransportMode.BOAT),
+            listOf(TransportMode.METRO, TransportMode.TRAM, TransportMode.TRAIN, TransportMode.BUS, TransportMode.BOAT, TransportMode.OTHER),
             DataSources.modes(big, hasKey = false),
         )
     }

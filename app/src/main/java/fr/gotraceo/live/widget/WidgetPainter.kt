@@ -1063,7 +1063,7 @@ private class Scene(
     }
 
     private fun badgeTextSize(line: LineBadge, height: Float): Float =
-        height * if (line.shape == BadgeShape.TRAM) 0.66f else 0.7f
+        height * line.textScale * if (line.shape == BadgeShape.TRAM) 0.66f else 0.7f
 
     /** Pastille de ligne à partir de [x], centrée sur [cy]. Renvoie sa largeur. */
     private fun badge(

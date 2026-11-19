@@ -6,6 +6,7 @@ import android.content.Intent
 import android.net.Uri
 import android.widget.Toast
 import fr.gotraceo.live.data.Line
+import fr.gotraceo.live.data.Network
 import fr.gotraceo.live.data.Networks
 import fr.gotraceo.live.data.TransportMode
 
@@ -16,21 +17,24 @@ object UiText {
 
     /**
      * « Métro 4 », « RER B », « Bus 38 »… En Île-de-France, le nom d'une ligne est son numéro ; ailleurs
-     * c'est souvent son parcours (« Bréviandes - Voves ») : le titre se fait alors avec son code.
+     * c'est souvent son parcours (« Bréviandes - Voves ») : le titre se fait alors avec son code. Un
+     * code long (« Flexo 51 », « Navette ») se suffit : il n'a pas besoin du nom de son mode.
      */
     fun lineTitle(line: Line): String {
+        val idfm = Networks.isIdfm(line.networkId)
         val prefix = when {
             line.mode == "metro" -> "Métro"
             line.isRer() -> "RER"
             line.mode == "rail" -> "Train"
             line.mode == "tram" -> "Tram"
             line.mode == "bus" -> "Bus"
-            line.mode == "cableway" -> "Câble"
+            // « Câble » est le nom du Câble C1 francilien ; ailleurs, c'est un téléphérique.
+            line.mode == "cableway" -> if (idfm) "Câble" else "Téléphérique"
             line.mode == "funicular" -> "Funiculaire"
             line.mode == "boat" -> "Bateau"
             else -> ""
         }
-        val name = (if (Networks.isIdfm(line.networkId)) line.name else line.shortName.ifBlank { line.name }).trim()
+        val name = (if (idfm) line.name else line.shortName.ifBlank { line.name }).trim()
         return if (prefix.isNotEmpty() && name.length <= 6 && !name.startsWith(prefix, ignoreCase = true)) {
             "$prefix $name"
         } else {
@@ -54,14 +58,15 @@ object UiText {
             }
         }
 
-    /** Pastille de texte d'un mode de transport. */
-    fun modeChip(mode: TransportMode): String = when (mode) {
+    /** Pastille de texte d'un mode de transport, dans ce réseau. */
+    fun modeChip(mode: TransportMode, network: Network = Networks.ILE_DE_FRANCE): String = when (mode) {
         TransportMode.METRO -> "M"
         TransportMode.RER -> "RER"
         TransportMode.TRAIN -> "Train"
         TransportMode.TRAM -> "T"
         TransportMode.BUS -> "Bus"
-        TransportMode.OTHER -> "Câble"
+        // Un réseau qui n'a qu'un funiculaire ne se voit pas proposer un câble.
+        TransportMode.OTHER -> if (!network.isIdfm && "cableway" !in network.modes && "funicular" in network.modes) "Funi" else "Câble"
         TransportMode.BOAT -> "Bateau"
     }
 

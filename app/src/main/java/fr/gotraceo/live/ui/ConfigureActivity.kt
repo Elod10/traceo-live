@@ -545,7 +545,7 @@ class ConfigureActivity : Activity() {
         val place = network.city.takeIf { hasNetworkStep }
         when (step) {
             Step.MODE -> if (place != null) showCrumb(null, place) else crumb.visibility = View.GONE
-            Step.LINE -> showCrumb(null, listOfNotNull(place, mode?.labelIn(network.id)).joinToString(" · "))
+            Step.LINE -> showCrumb(null, listOfNotNull(place, mode?.labelIn(network)).joinToString(" · "))
             Step.STOP -> showCrumb(line, line?.let(UiText::lineTitle).orEmpty())
             else -> crumb.visibility = View.GONE
         }
@@ -906,9 +906,9 @@ class ConfigureActivity : Activity() {
         val modes = DataSources.modes(network, hasKey)
         modes.forEachIndexed { index, m ->
             items += RowItem(
-                title = m.labelIn(network.id),
+                title = m.labelIn(network),
                 subtitle = UiText.modeSubtitle(m, network.id),
-                chip = UiText.modeChip(m),
+                chip = UiText.modeChip(m, network),
                 style = RowStyle.inGroup(index, modes.size),
                 chevron = true,
                 payload = m,

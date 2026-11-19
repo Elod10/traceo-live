@@ -174,14 +174,17 @@ object DataSources {
         TransportMode.IDFM.filter { hasKey || it != TransportMode.OTHER }
 
     /**
-     * Modes proposés pour un réseau : hors Île-de-France, ceux que le catalogue lui connaît. Le RER et
-     * le Transilien restent franciliens : ailleurs, une ligne ferrée est un train.
+     * Modes proposés pour un réseau : hors Île-de-France, ceux que le catalogue lui connaît, dans
+     * l'ordre de [TransportMode.ELSEWHERE]. Le RER et le Transilien restent franciliens : ailleurs,
+     * une ligne ferrée est un train. Un réseau dont le catalogue ne dit pas les modes les propose
+     * tous : mieux vaut un mode vide qu'une ligne introuvable.
      */
     fun modes(network: Network, hasKey: Boolean): List<TransportMode> =
         if (network.isIdfm) {
             modes(hasKey)
         } else {
-            TransportMode.entries.filter { mode -> mode != TransportMode.RER && mode.apiModes.any { it in network.modes } }
+            TransportMode.ELSEWHERE.filter { mode -> mode.apiModes.any { it in network.modes } }
+                .ifEmpty { TransportMode.ELSEWHERE }
         }
 
     /**
