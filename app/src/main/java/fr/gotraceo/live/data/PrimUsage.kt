@@ -119,6 +119,62 @@ object RefreshSchedule {
     /** Marge, car une alarme peut arriver un peu tôt. */
     const val EARLY_MS = 15_000L
 
+    /**
+     * Un réseau hors Île-de-France n'est relevé que quand on le demande. Quand il dormait, sa réponse
+     * n'a pas de relevé récent et annonce le prochain pour dans quelques secondes : c'est l'heure de
+     * son réveil. Au-delà de ce délai, l'annonce est celle de sa cadence ordinaire.
+     */
+    const val WAKE_WINDOW_MS = 20_000L
+
+    /** Marge après l'heure annoncée du réveil : le premier relevé peut tarder un peu. */
+    const val WAKE_MARGIN_MS = 2_000L
+
+    /** Étalement des retours entre les installations, en plus de la marge. */
+    const val WAKE_SPREAD_MS = 4_000L
+
+    /** Écart minimal avant de redemander un réseau qui se réveille. */
+    const val WAKE_MIN_GAP_MS = 5_000L
+
+    /** Passé ce délai après l'heure annoncée, le réveil n'est plus attendu : l'intervalle reprend. */
+    const val WAKE_GRACE_MS = 30_000L
+
+    /**
+     * Retours accordés à la suite pour un même réveil. Une réponse sans relevé récent qui annonce
+     * le prochain tout près n'est pas toujours un réveil : un flux en panne en donne aussi. Sans
+     * cette borne, le widget redemanderait toutes les quelques secondes tant que la panne dure.
+     */
+    const val WAKE_MAX_RETURNS = 2
+
+    /**
+     * Heure à laquelle revenir après une réponse, ou null si elle n'est pas celle d'un réseau qui se
+     * réveille : relevé récent, prochain relevé annoncé à sa cadence, ou retours épuisés. Le widget
+     * y revient au lieu d'attendre un intervalle entier sans passage. L'Île-de-France, relevée en
+     * continu, ne se réveille pas.
+     *
+     * Chaque widget en décide d'après ses propres réponses : celle d'un autre widget du même
+     * réseau, arrivée après le relevé, ne doit pas annuler son retour.
+     *
+     * @param fresh fraîcheur du relevé reçu, faux aussi quand le réseau n'a jamais été relevé
+     * @param nextAt `nextAt` de cette réponse, null si le réseau n'annonce rien
+     * @param now heure de la réponse
+     * @param returnsMade retours déjà faits à la suite pour ce réveil (cf. [wakeReturnsMade])
+     */
+    fun wakeAt(networkId: String, fresh: Boolean?, nextAt: Long?, now: Long, returnsMade: Int): Long? {
+        if (Networks.isIdfm(networkId) || fresh != false || nextAt == null || nextAt <= 0L) return null
+        if (returnsMade >= WAKE_MAX_RETURNS || nextAt - now !in 0..WAKE_WINDOW_MS) return null
+        return nextAt
+    }
+
+    /** Vrai tant que le retour prévu à [wakeAt] est attendu : écran resté éteint, il ne l'est plus. */
+    fun awaitsWake(wakeAt: Long?, now: Long): Boolean = wakeAt != null && now <= wakeAt + WAKE_GRACE_MS
+
+    /**
+     * Retours déjà faits quand une réponse arrive : un de plus si elle répond à un retour encore
+     * attendu, zéro sinon, car c'est alors une actualisation ordinaire.
+     */
+    fun wakeReturnsMade(previousWakeAt: Long?, previousReturns: Int, now: Long): Int =
+        if (awaitsWake(previousWakeAt, now)) previousReturns + 1 else 0
+
     /** Bornes du décalage propre à chaque installation. */
     const val OFFSET_MIN_MS = 2_000L
     const val OFFSET_MAX_MS = 40_000L
@@ -134,6 +190,8 @@ object RefreshSchedule {
      * @param traceoNextAt dernier `nextAt` reçu de Tracéo, null ou 0 si inconnu
      * @param offsetMs décalage de cette installation
      * @param sourceMinutes cadence de relevé du réseau chez Tracéo : 2 minutes en Île-de-France
+     * @param wakeAt heure du réveil que le widget attend encore (cf. [wakeAt], [awaitsWake]) : il y
+     *        revient quel que soit l'intervalle, même manuel
      */
     fun dueAt(
         attemptedAt: Long?,
@@ -142,8 +200,12 @@ object RefreshSchedule {
         traceoNextAt: Long?,
         offsetMs: Long,
         sourceMinutes: Int = DataSources.TRACEO_MIN_REFRESH_MINUTES,
+        wakeAt: Long? = null,
     ): Long? {
         if (attemptedAt == null) return 0L
+        if (wakeAt != null && followsTraceo) {
+            return max(attemptedAt + WAKE_MIN_GAP_MS, wakeAt + WAKE_MARGIN_MS + Math.floorMod(offsetMs, WAKE_SPREAD_MS))
+        }
         if (refreshMinutes <= 0) return null
         val byInterval = attemptedAt + refreshMinutes * MINUTE_MS - EARLY_MS
         if (!followsTraceo || traceoNextAt == null || traceoNextAt <= 0L) return byInterval

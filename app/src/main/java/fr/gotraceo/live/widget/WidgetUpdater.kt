@@ -246,6 +246,16 @@ object WidgetUpdater {
         return Timing.of(context, Prefs(context)).dueAt(context, widgetId)?.let { it <= now } == true
     }
 
+    /**
+     * Vrai si le widget attend le réveil de son réseau : son actualisation à venir n'est qu'un retour
+     * chercher le premier relevé, pas une occasion de relire la position.
+     */
+    fun awaitsWake(context: Context, widgetId: Int, now: Long): Boolean {
+        val prefs = Prefs(context)
+        val wakeAt = if (WidgetProviders.isProximity(context, widgetId)) prefs.proximity(widgetId)?.wakeAt else prefs.state(widgetId)?.wakeAt
+        return RefreshSchedule.awaitsWake(wakeAt, now)
+    }
+
     /** Ce qui fixe les échéances des widgets d'un réseau : source, intervalle et relevé annoncé par Tracéo. */
     private class SourceTiming(
         val followsTraceo: Boolean,
@@ -289,14 +299,23 @@ object WidgetUpdater {
         fun of(widgetId: Int): SourceTiming = of(prefs.config(widgetId)?.networkId ?: Networks.IDFM)
 
         fun dueAt(context: Context, widgetId: Int): Long? {
-            val attemptedAt = if (WidgetProviders.isProximity(context, widgetId)) {
-                prefs.proximity(widgetId)?.attemptedAt
+            val attemptedAt: Long?
+            val wakeAt: Long?
+            if (WidgetProviders.isProximity(context, widgetId)) {
+                val state = prefs.proximity(widgetId)
+                attemptedAt = state?.attemptedAt
+                wakeAt = state?.wakeAt
             } else {
-                prefs.state(widgetId)?.attemptedAt
+                val state = prefs.state(widgetId)
+                attemptedAt = state?.attemptedAt
+                wakeAt = state?.wakeAt
             }
             val source = of(widgetId)
+            // Un réseau qui se réveillait à la dernière réponse du widget annonce son premier relevé
+            // pour dans quelques secondes : il y revient, sans attendre un intervalle entier.
             return RefreshSchedule.dueAt(
                 attemptedAt, source.refreshMinutes, source.followsTraceo, source.traceoNextAt, offsetMs, source.sourceMinutes,
+                wakeAt.takeIf { RefreshSchedule.awaitsWake(it, System.currentTimeMillis()) },
             )
         }
 

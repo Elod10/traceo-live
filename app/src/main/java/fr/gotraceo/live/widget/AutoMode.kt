@@ -26,6 +26,7 @@ import fr.gotraceo.live.data.PositionReader
 import fr.gotraceo.live.data.Prefs
 import fr.gotraceo.live.data.Proximity
 import fr.gotraceo.live.data.ProximityState
+import fr.gotraceo.live.data.RefreshSchedule
 import fr.gotraceo.live.data.StopIndexStore
 import fr.gotraceo.live.data.TransportMode
 import fr.gotraceo.live.data.WidgetConfig
@@ -57,6 +58,9 @@ object AutoMode {
     private const val INDEX_FILE = "stop_index.bin"
     private const val NETWORK_INDEX_PREFIX = "stop_index_"
     private const val INDEX_SUFFIX = ".bin"
+
+    /** Attente la plus longue du premier relevé d'un réseau qui se réveille, avant de choisir une ligne. */
+    private const val MAX_WAKE_WAIT_MS = 10_000L
 
     /** Widgets dont la position est en cours de lecture : la feuille de choix l'attend. */
     private val locating: MutableSet<Int> = ConcurrentHashMap.newKeySet()
@@ -202,7 +206,8 @@ object AutoMode {
         val prefs = Prefs(context)
         return ids.filter { id ->
             prefs.followsPosition(id) && prefs.config(id)?.auto == true && prefs.inTimeWindow(id) &&
-                !isLocating(id) && WidgetUpdater.isDue(context, id, now)
+                // Le retour vers un réseau qui se réveille ne relit pas la position : il va chercher son relevé.
+                !isLocating(id) && WidgetUpdater.isDue(context, id, now) && !WidgetUpdater.awaitsWake(context, id, now)
         }
     }
 
@@ -322,6 +327,9 @@ object AutoMode {
             ),
         )
         WidgetUpdater.render(app, widgetId)
+        // L'état vient peut-être d'être écrit sans passer par une actualisation : son échéance,
+        // dont le retour vers un réseau qui se réveille, doit avoir son alarme.
+        WidgetUpdater.scheduleTick(app)
     }
 
     /**
@@ -392,19 +400,34 @@ object AutoMode {
         val source = Sources.passages(prefs.appContext, ranked.first().nearby.line.networkId)
         val now = System.currentTimeMillis()
         var offline = false
+        var awaitedWake = false
+        fun probe(nearby: NearbyLine, previous: WidgetState?): Pair<WidgetConfig, WidgetState> {
+            val next = configFor(config.widgetId, nearby, config.theme)
+            // Sans réseau, inutile d'attendre le délai d'expiration de chaque ligne.
+            val result = if (offline) {
+                Result.failure(IOException("Réseau indisponible"))
+            } else {
+                fetch(source, nearby)
+            }
+            if (DataSources.isNetworkFailure(result.exceptionOrNull())) offline = true
+            return next to WidgetStates.from(next, listOf(result), previous, System.currentTimeMillis(), removeTerminusArrivals = !hasKey)
+        }
         val chosen = withContext(Dispatchers.IO) {
             NearbyRules.pickActive(
                 ranked,
                 probe = { nearby ->
-                    val next = configFor(config.widgetId, nearby, config.theme)
-                    // Sans réseau, inutile d'attendre le délai d'expiration de chaque ligne.
-                    val result = if (offline) {
-                        Result.failure(IOException("Réseau indisponible"))
+                    val first = probe(nearby, null)
+                    val wakeAt = first.second.wakeAt
+                    if (awaitedWake || wakeAt == null) {
+                        first
                     } else {
-                        fetch(source, nearby)
+                        // Le réseau dormait : la meilleure ligne répond sans passage, et la suivante,
+                        // sondée après le relevé, lui prendrait sa place. On attend ce relevé, une fois.
+                        awaitedWake = true
+                        val wait = wakeAt + RefreshSchedule.WAKE_MARGIN_MS - System.currentTimeMillis()
+                        Thread.sleep(wait.coerceIn(0L, MAX_WAKE_WAIT_MS))
+                        probe(nearby, first.second)
                     }
-                    if (DataSources.isNetworkFailure(result.exceptionOrNull())) offline = true
-                    next to WidgetStates.from(next, listOf(result), null, now, removeTerminusArrivals = !hasKey)
                 },
                 isActive = { (_, state) -> Proximity.hasPassageSoon(state.departures, now) },
             )
@@ -459,6 +482,8 @@ object AutoMode {
             ),
         )
         WidgetUpdater.render(app, widgetId)
+        // L'état est écrit sans passer par une actualisation : son échéance doit avoir son alarme.
+        WidgetUpdater.scheduleTick(app)
     }
 
     /** Ferme la fenêtre du double toucher : le prochain toucher relira la position. */
