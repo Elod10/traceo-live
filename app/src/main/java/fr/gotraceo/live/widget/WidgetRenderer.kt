@@ -198,7 +198,7 @@ object WidgetRenderer {
     }
 
     fun refreshPendingIntent(context: Context, widgetId: Int): PendingIntent {
-        val intent = Intent(context, DeparturesWidgetProvider::class.java)
+        val intent = Intent(context, WidgetActionReceiver::class.java)
             .setAction(WidgetUpdater.ACTION_REFRESH)
             .setData(Uri.parse("traceolive://widget/refresh/$widgetId"))
             .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, widgetId)

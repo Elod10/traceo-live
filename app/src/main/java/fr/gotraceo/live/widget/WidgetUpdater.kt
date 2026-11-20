@@ -262,7 +262,7 @@ object WidgetUpdater {
     // --- Planification du tick -------------------------------------------------------------
 
     private fun alarmIntent(context: Context, action: String): PendingIntent {
-        val intent = Intent(context, DeparturesWidgetProvider::class.java).setAction(action)
+        val intent = Intent(context, WidgetActionReceiver::class.java).setAction(action)
         return PendingIntent.getBroadcast(
             context, 0, intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
@@ -279,6 +279,26 @@ object WidgetUpdater {
             setAlarms(context)
         } catch (e: RuntimeException) {
             Log.w(TAG, "Programmation du tick impossible", e)
+        }
+    }
+
+    /**
+     * Après une mise à jour de l'application : retire le tick et le filet de sécurité programmés par
+     * les versions jusqu'à 2.0.4, qui visaient le widget lui-même. Le widget ne les traite plus, et le
+     * filet, répété, le réveillerait encore toutes les quelques minutes.
+     */
+    fun cancelLegacyAlarms(context: Context) {
+        val alarmManager = context.getSystemService(AlarmManager::class.java) ?: return
+        for (action in listOf(ACTION_TICK, ACTION_WATCHDOG)) {
+            val intent = Intent(context, DeparturesWidgetProvider::class.java).setAction(action)
+            val legacy = PendingIntent.getBroadcast(
+                context, 0, intent,
+                PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE,
+            )
+            if (legacy != null) {
+                alarmManager.cancel(legacy)
+                legacy.cancel()
+            }
         }
     }
 
@@ -333,7 +353,7 @@ object WidgetUpdater {
 
     /** Demande une actualisation immédiate (depuis l'application). */
     fun requestRefresh(context: Context, widgetId: Int? = null) {
-        val intent = Intent(context, DeparturesWidgetProvider::class.java).setAction(ACTION_REFRESH)
+        val intent = Intent(context, WidgetActionReceiver::class.java).setAction(ACTION_REFRESH)
         if (widgetId != null) intent.putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, widgetId)
         context.sendBroadcast(intent)
     }
@@ -343,6 +363,6 @@ object WidgetUpdater {
      * sont actualisés, les autres redessinés, et le tick suivant est programmé.
      */
     fun requestTick(context: Context) {
-        context.sendBroadcast(Intent(context, DeparturesWidgetProvider::class.java).setAction(ACTION_TICK))
+        context.sendBroadcast(Intent(context, WidgetActionReceiver::class.java).setAction(ACTION_TICK))
     }
 }

@@ -220,7 +220,7 @@ object PassageNotifications {
     }
 
     private fun dismissIntent(context: Context, widgetId: Int): PendingIntent {
-        val intent = Intent(context, DeparturesWidgetProvider::class.java)
+        val intent = Intent(context, WidgetActionReceiver::class.java)
             .setAction(ACTION_DISMISSED)
             .setData(Uri.parse("traceolive://notification/dismissed/$widgetId"))
             .putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, widgetId)

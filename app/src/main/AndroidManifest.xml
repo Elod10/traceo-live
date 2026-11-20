@@ -239,6 +239,10 @@
         </receiver>
 
         <receiver
+            android:name=".widget.WidgetActionReceiver"
+            android:exported="false" />
+
+        <receiver
             android:name=".widget.BootReceiver"
             android:exported="false">
             <intent-filter>
