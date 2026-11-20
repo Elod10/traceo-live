@@ -801,6 +801,7 @@ private class Scene(
                 notice.detail != null -> null
                 else -> R.string.widget_no_departure
             }
+            NoticeKind.INTERRUPTED -> if (small) R.string.widget_short_interrupted else R.string.widget_interrupted
             else -> if (small) R.string.widget_short_error else null
         }?.let { context.getString(it) } ?: notice.detail.orEmpty()
         val size = if (small) 12.5f else 14.5f

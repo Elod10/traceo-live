@@ -222,6 +222,8 @@ class TraceoClient(
             nextAt = SiriParser.parseTime(root.optStringOrNull("nextAt")),
             viaTraceo = true,
             waking = if (root.has("waking") && !root.isNull("waking")) root.optBoolean("waking") else null,
+            // Un statut inconnu ne dit rien : contrairement au catalogue, il n'est pas pris pour `ok`.
+            status = root.optStringOrNull("status")?.let { key -> NetworkStatus.entries.firstOrNull { it.key == key } },
         )
     }
 

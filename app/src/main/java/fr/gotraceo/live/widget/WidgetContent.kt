@@ -301,6 +301,9 @@ enum class NoticeKind {
 
     /** Widget qui suit la position, emmené là où aucun réseau n'a d'arrêt à portée. */
     NO_NETWORK,
+
+    /** Aucun passage, parce que Tracéo dit le temps réel du réseau interrompu (`status: stale`). */
+    INTERRUPTED,
 }
 
 /** Un sens d'une ligne du format À proximité. */
@@ -625,6 +628,9 @@ object WidgetModels {
             state.error != null -> Notice(NoticeKind.ERROR, state.error)
             // Le réseau se réveille : son premier relevé arrive, « Aucun passage » serait faux.
             RefreshSchedule.awaitsWake(state.wakeAt, now) -> Notice(NoticeKind.LOADING)
+            // Relevé frais mais sans passage, et le réseau dit son temps réel interrompu : « Aucun
+            // passage » serait faux.
+            state.interrupted -> Notice(NoticeKind.INTERRUPTED)
             // Une ligne absente du flux temps réel n'aura jamais de passage : mieux vaut le dire.
             else -> Notice(NoticeKind.NO_DEPARTURE, NO_REALTIME.takeIf { line?.realtime == false })
         }
@@ -704,6 +710,7 @@ object WidgetModels {
             state == null -> Notice(NoticeKind.LOADING)
             state.error != null -> Notice(NoticeKind.ERROR, state.error)
             RefreshSchedule.awaitsWake(state.wakeAt, now) -> Notice(NoticeKind.LOADING)
+            state.interrupted -> Notice(NoticeKind.INTERRUPTED)
             else -> Notice(NoticeKind.NO_DEPARTURE)
         }
         val snapshot = state?.takeIf { it.isSnapshot }

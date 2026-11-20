@@ -21,6 +21,12 @@ data class PassageSnapshot(
      * fini, faux sinon, réussi ou non ; null s'il ne le dit pas (Île-de-France, ancien serveur).
      */
     val waking: Boolean? = null,
+    /**
+     * Statut du réseau au moment de la réponse (`status`), comme au catalogue : `stale` avec un relevé
+     * frais et sans passage veut dire « temps réel interrompu ». Null s'il n'est pas dit ; pendant un
+     * réveil, c'est celui du dernier relevé connu.
+     */
+    val status: NetworkStatus? = null,
 )
 
 /** Une source de passages. Les erreurs sont levées en exceptions au message lisible par l'utilisateur. */
@@ -310,8 +316,16 @@ object WidgetStates {
             fresh = fresh,
             wakeAt = wakeAt,
             wakeReturns = if (wakeAt != null) returnsMade else 0,
+            interrupted = interrupted(config.networkId, snapshots),
         )
     }
+
+    /**
+     * Vrai si Tracéo dit le temps réel du réseau interrompu (`status: stale`). Pendant un réveil, le
+     * statut est celui d'avant, voire celui d'un serveur qui vient de redémarrer : il ne compte pas.
+     */
+    fun interrupted(networkId: String, snapshots: List<PassageSnapshot>): Boolean =
+        !Networks.isIdfm(networkId) && snapshots.any { it.status == NetworkStatus.STALE && it.waking != true }
 
     fun errorMessage(t: Throwable): String = when (t) {
         is PrimException -> t.message ?: "Erreur PRIM"

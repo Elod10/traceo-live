@@ -205,6 +205,7 @@ object WidgetRenderer {
             NoticeKind.NO_DEPARTURE ->
                 model.stopName + ". " + (notice.detail ?: context.getString(R.string.widget_no_departure))
             NoticeKind.ERROR -> model.stopName + ". " + notice.detail.orEmpty()
+            NoticeKind.INTERRUPTED -> model.stopName + ". " + context.getString(R.string.widget_interrupted)
         }
     }
 

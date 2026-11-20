@@ -1,5 +1,7 @@
 package fr.gotraceo.live.data
 
+import fr.gotraceo.live.widget.NoticeKind
+import fr.gotraceo.live.widget.WidgetModels
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -319,6 +321,75 @@ class TraceoMr1ContractTest {
         val waking = PassageSnapshot(emptyList(), null, false, now + 3_000L, viaTraceo = true, waking = true)
         assertEquals(now + 3_000L, stateFrom(listOf(served, waking), null, now).wakeAt)
         assertNull(stateFrom(listOf(served, served), null, now).wakeAt)
+    }
+
+    // --- Le statut dans les passages (Q10) ---------------------------------------------------------
+
+    /** Exemple de Tracéo pour Q10 : un relevé frais, aucun passage, des horaires périmés. */
+    private val staleBody = """{"passages": [], "fetchedAt": "2026-11-20T17:20:05Z", "ageSec": 12, "fresh": true,
+        "nextAt": "2026-11-20T17:22:11+00:00", "waking": false, "status": "stale"}"""
+
+    @Test
+    fun aSnapshotSaysTheStatusOfItsNetwork() {
+        server.respond(PASSAGES_PATH, 200, staleBody)
+        assertEquals(NetworkStatus.STALE, client().departures("TCAR:ST:MMAIR", "TCAR:10", NETWORK).status)
+        // Absent (serveur d'avant Q10) ou inconnu : il ne dit rien, et n'est pas pris pour `ok`.
+        for (body in listOf(PASSAGES, staleBody.replace("\"stale\"", "\"degraded\""))) {
+            server.clear()
+            server.respond(PASSAGES_PATH, 200, body)
+            assertNull(client().departures("TCAR:ST:MMAIR", "TCAR:10", NETWORK).status)
+        }
+    }
+
+    /**
+     * `stale` avec un relevé frais et aucun passage, c'est le temps réel interrompu : Troyes et Tours,
+     * dont les horaires publiés ne correspondent plus au flux. Le widget le dit, au lieu de « Aucun passage ».
+     */
+    @Test
+    fun aStaleNetworkSaysItsRealtimeIsInterrupted() {
+        val now = time("2026-11-20T17:20:17Z")
+        server.respond(PASSAGES_PATH, 200, staleBody)
+        val snapshot = client().departures("TCAR:ST:MMAIR", "TCAR:10", NETWORK)
+        val state = stateFrom(listOf(snapshot), null, now)
+        assertTrue(state.interrupted)
+        assertEquals(true, state.fresh)
+        assertTrue(WidgetState.fromJson(state.toJson()).interrupted)
+        assertFalse(WidgetState.fromJson(state.copy(interrupted = false).toJson()).interrupted)
+
+        // Pendant un réveil, le statut est celui d'avant (`ok` après un redémarrage) : il ne compte pas.
+        assertFalse(stateFrom(listOf(snapshot.copy(waking = true)), null, now).interrupted)
+        // `ok`, ou rien de dit : pas d'interruption.
+        assertFalse(stateFrom(listOf(snapshot.copy(status = NetworkStatus.OK)), null, now).interrupted)
+        assertFalse(stateFrom(listOf(snapshot.copy(status = null)), null, now).interrupted)
+        // L'Île-de-France ne dit pas de statut, et n'en lit pas.
+        val paris = Stop("Bastille", null, listOf("stop_area:IDFM:71634"))
+        val idf = WidgetConfig(1, TransportMode.METRO, Line("C01371", "1", "1", "metro"), paris, Directions.allDirections(paris), "")
+        assertFalse(stateFrom(listOf(snapshot), null, now, of = idf).interrupted)
+    }
+
+    /** Le widget, sa notification et la tuile le disent ; des passages, s'il en reste, se montrent. */
+    @Test
+    fun theWidgetSaysTheRealtimeIsInterrupted() {
+        val now = time("2026-11-20T17:20:17Z")
+        val interrupted = WidgetState(now, now, emptyList(), null, dataAt = now - 12_000L, fresh = true, interrupted = true)
+        fun notice(state: WidgetState) = WidgetModels.build(
+            config, state, hasApiKey = false, refreshing = false, widthDp = 348f, heightDp = 192f, now = now,
+        ).notice?.kind
+        assertEquals(NoticeKind.INTERRUPTED, notice(interrupted))
+        assertEquals(NoticeKind.NO_DEPARTURE, notice(interrupted.copy(interrupted = false)))
+        // Le réveil et l'erreur passent devant.
+        assertEquals(NoticeKind.LOADING, notice(interrupted.copy(wakeAt = now + 3_000L)))
+        assertEquals(NoticeKind.ERROR, notice(interrupted.copy(error = "Panne")))
+        val bus = Departure("TCAR:10", "Lycée Flaubert", null, "0", now + 4 * MINUTE, null, null, null, false, null, "onTime", null, "TCAR:ST:MMAIR")
+        assertNull(notice(interrupted.copy(departures = listOf(bus))))
+
+        val proximity = ProximityState(now, now, emptyList(), dataAt = now, fresh = true, interrupted = true)
+        fun proximityNotice(state: ProximityState) = WidgetModels.buildProximity(
+            config, state, refreshing = false, widthDp = 348f, heightDp = 192f, now = now, night = true,
+        ).notice?.kind
+        assertEquals(NoticeKind.INTERRUPTED, proximityNotice(proximity))
+        assertEquals(NoticeKind.NO_DEPARTURE, proximityNotice(proximity.copy(interrupted = false)))
+        assertTrue(ProximityState.fromJson(proximity.toJson()).interrupted)
     }
 
     // --- Stations qui réunissent leurs quais ----------------------------------------------------

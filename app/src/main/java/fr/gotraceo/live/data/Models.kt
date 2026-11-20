@@ -340,6 +340,8 @@ data class WidgetState(
     val wakeAt: Long? = null,
     /** Retours déjà faits à la suite pour ce réveil. */
     val wakeReturns: Int = 0,
+    /** Vrai si Tracéo disait le temps réel du réseau interrompu à la dernière réponse (cf. [WidgetStates.interrupted]). */
+    val interrupted: Boolean = false,
 ) {
     /** Vrai si les passages viennent d'un relevé de la source, et non d'une réponse en direct. */
     val isSnapshot: Boolean get() = fresh != null
@@ -353,6 +355,7 @@ data class WidgetState(
         .putOpt("fresh", fresh)
         .putOpt("wakeAt", wakeAt)
         .putOpt("wakeReturns", wakeReturns.takeIf { it > 0 })
+        .putOpt("interrupted", true.takeIf { interrupted })
 
     companion object {
         fun fromJson(o: JSONObject): WidgetState {
@@ -369,6 +372,7 @@ data class WidgetState(
                 fresh = if (o.has("fresh") && !o.isNull("fresh")) o.optBoolean("fresh") else null,
                 wakeAt = o.optLongOrNull("wakeAt"),
                 wakeReturns = o.optInt("wakeReturns"),
+                interrupted = o.optBoolean("interrupted"),
             )
         }
     }

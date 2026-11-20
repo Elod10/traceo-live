@@ -80,7 +80,7 @@ documentation d'API ; l'appli les suit.
 | Ligne | `id` (opaque), `code` (pastille), `name`, `color`, `textColor`, `mode` | `Line` |
 | Station | `stations[].id`, et `zone` dans l'index : une zone d'arrêt, tous les quais, les deux sens | `Stop` |
 | Quai | une entrée de `stops[]` dans l'index | `IndexedStop` |
-| Relevé | `fetchedAt`, `ageSec`, `fresh`, `nextAt`, `waking` | `PassageSnapshot` |
+| Relevé | `fetchedAt`, `ageSec`, `fresh`, `nextAt`, `waking`, `status` | `PassageSnapshot` |
 
 À l'écran, l'appli dit « réseau », « ville », « ligne », « arrêt » et « relevé ». Elle ne dit ni
 « station » ni « zone ».
@@ -431,20 +431,25 @@ lignes, les arrêts d'une ligne, les passages, l'index et les trois 404 d'un ré
   gardé au catalogue en `off`, déjà grisé à l'étape « Réseau » ; l'en-tête `Etag` écrit autrement
   par le relais de la préproduction (l'appli lit les en-têtes sans tenir compte de la casse, et ne
   se sert pas de l'ETag).
-- **Limite : un réseau aux horaires périmés.** À Troyes et à Tours, les horaires publiés ne
-  correspondent plus au flux : le relevé est frais, ne donne aucun passage, et le catalogue dit
-  `stale`. Le widget dit « Aucun passage », ce qui est faux : il ne relit le catalogue qu'une fois
-  par jour, et la réponse des passages ne porte pas le statut (question Q10).
+- **Un réseau aux horaires périmés.** À Troyes et à Tours, les horaires publiés ne correspondent
+  plus au flux : le relevé est frais, ne donne aucun passage, et le réseau est `stale`. Le widget
+  ne relit le catalogue qu'une fois par jour : Tracéo met donc le statut dans la réponse des
+  passages (Q10). Quand il vaut `stale`, hors réveil, et qu'il n'y a rien à montrer, le widget, sa
+  notification et la tuile disent « Temps réel interrompu sur ce réseau pour le moment » (« Sans
+  temps réel » en pastille), au lieu de « Aucun passage » ; le format À proximité aussi. Pendant un
+  réveil, le statut est celui d'avant (`ok` après un redémarrage du serveur) : il ne compte pas, le
+  widget le lit au retour. Un statut absent ou inconnu ne dit rien. Tracéo dit maintenant les
+  horaires périmés dès le premier relevé, plus au troisième.
 
 ## 11. Questions à Tracéo
 
 Ce qui manquait à l'appli dans le contrat. La brique MR1 (20 novembre 2026) a répondu à toutes,
-sauf Q3, reportée ; Q10 est nouvelle.
+sauf Q3, reportée.
 
 | | Question | Réponse de Tracéo | Dans l'appli |
 |---|---|---|---|
 | Q1 | Un code stable dans le corps des 404 | Fait : `code` vaut `network`, `line`, `stop` ou `route` ; le message ne change pas | Lu (lot 13) ; le message reste un repli |
-| Q2 | Un délai relatif à côté de `nextAt`, pour ne pas dépendre de l'horloge du téléphone | Proposé : `max-age` moins l'en-tête `Age` ; il faudrait porter le plafond de `max-age` de 60 secondes à la cadence | Pas nécessaire : pendant un réveil, `nextAt` moins l'en-tête `Date` (lot 13). Réponse proposée : laisser le plafond |
+| Q2 | Un délai relatif à côté de `nextAt`, pour ne pas dépendre de l'horloge du téléphone | Proposé : `max-age` moins l'en-tête `Age` ; il faudrait porter le plafond de `max-age` de 60 secondes à la cadence | Pas nécessaire : pendant un réveil, `nextAt` moins l'en-tête `Date` (lot 13). Plafond laissé ; Tracéo s'engage par écrit sur `Date`, posé à l'envoi par la même horloge que `nextAt` |
 | Q3 | De quoi situer un arrêt dans la réponse des arrêts d'une ligne | Reporté : `lat` et `lon` du centre de la station, en ajout | Pour distinguer deux arrêts de même nom, elle télécharge l'index entier du réseau |
 | Q4 | Un indicateur explicite de réveil | Fait : `waking`, faux dès la fin du premier appel au flux, réussi ou non | Lu (lot 13) ; la déduction du lot 7 reste un repli |
 | Q5 | `textColor` nul quand le réseau ne publie pas de couleur de texte | Fait ; Tracéo demande si l'appli préfère `null` ou `#000000` | `null` : l'appli choisit le contraste (lot 13) |
@@ -452,7 +457,7 @@ sauf Q3, reportée ; Q10 est nouvelle.
 | Q7 | `indexAt` change-t-il à chaque compilation ? | C'était le cas ; corrigé : il ne change qu'avec les lignes, les stations, l'index, l'emprise ou les modes. Pas encore observé sur plusieurs jours | Rien à changer |
 | Q8 | La date de mise à jour du jeu de données | Fait : `attribution.updatedAt`, ou `null` | Écran des sources (lot 13) |
 | Q9 | `attribution.text` commence-t-il toujours par « Contient des informations » ? | Garanti | Rien à changer |
-| Q10 | Le statut du réseau dans la réponse des passages (`status`, en ajout), pour qu'un widget sache que le temps réel est interrompu sans relire le catalogue | À poser | « Aucun passage » à Troyes et à Tours tant que leurs horaires sont périmés |
+| Q10 | Le statut du réseau dans la réponse des passages, pour qu'un widget sache que le temps réel est interrompu sans relire le catalogue | Fait le 20 novembre au soir, pas encore en préproduction : `status`, `ok` ou `stale`, lu au moment de la réponse ; celui du dernier relevé pendant un réveil | Lu (lot 13) : « Temps réel interrompu sur ce réseau » |
 
 ## 12. Proposition : rattacher un widget après un changement d'identifiants
 
