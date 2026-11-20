@@ -1,6 +1,7 @@
 package fr.gotraceo.live.widget
 
 import fr.gotraceo.live.data.Line
+import fr.gotraceo.live.data.Networks
 import fr.gotraceo.live.data.WidgetTheme
 import kotlin.math.pow
 
@@ -44,8 +45,7 @@ object Palettes {
      * @param night vrai si le système est en thème sombre : le thème automatique le suit
      */
     fun resolve(theme: WidgetTheme, format: WidgetFormat, line: Line?, night: Boolean = true): Palette {
-        val color = line?.let { parseColor(it.color) ?: defaultColor(it.mode) } ?: 0xFF546E7A.toInt()
-        val on = onColor(color, line?.let { parseColor(it.textColor) })
+        val (color, on) = line?.let(::lineColors) ?: (NEUTRAL to onColor(NEUTRAL, null))
         return when {
             // La liste porte des retards en couleur, illisibles sur une couleur de ligne.
             theme == WidgetTheme.LINE && line != null && format != WidgetFormat.LISTE -> linePalette(color, on)
@@ -54,10 +54,39 @@ object Palettes {
         }
     }
 
-    /** Couleur d'une ligne et couleur de texte lisible dessus. */
+    /**
+     * Couleur d'une ligne et couleur de texte lisible dessus. Une ligne dont le réseau ne publie pas
+     * de couleur prend celle de son mode ; la couleur de texte publiée n'est gardée que si elle se lit
+     * sur la couleur de la ligne.
+     */
     fun lineColors(line: Line): Pair<Int, Int> {
-        val color = parseColor(line.color) ?: defaultColor(line.mode)
-        return color to onColor(color, parseColor(line.textColor))
+        val published = publishedColor(line)
+        val color = published ?: modeColor(line.mode)
+        return color to onColor(color, publishedTextColor(line).takeIf { published != null })
+    }
+
+    /**
+     * La couleur de texte que le réseau publie pour sa ligne, ou null. Tracéo sert `null` quand le
+     * réseau n'en publie pas, même pour une ligne dont il publie la couleur : [onColor] choisit alors
+     * le noir ou le blanc. Un noir servi est donc un choix du réseau, gardé s'il se lit. Sans couleur
+     * de ligne publiée, la couleur de texte ne dit rien de celle du mode.
+     */
+    fun publishedTextColor(line: Line): Int? = parseColor(line.textColor)
+
+    /**
+     * La couleur que le réseau publie pour sa ligne, ou null s'il n'en publie pas.
+     *
+     * Hors Île-de-France, le blanc avec un texte noir (ou sans texte) compte comme une absence : ce
+     * sont les valeurs par défaut des horaires au format GTFS, et Tracéo les a servies telles quelles
+     * pour une ligne sans couleur avant de servir `null`. Un réseau qui choisirait vraiment ce couple
+     * verrait donc ses lignes à la couleur de leur mode.
+     */
+    fun publishedColor(line: Line): Int? {
+        val color = parseColor(line.color) ?: return null
+        if (Networks.isIdfm(line.networkId)) return color
+        val text = parseColor(line.textColor)
+        val gtfsDefault = color == WHITE && (text == null || text == BLACK)
+        return color.takeUnless { gtfsDefault }
     }
 
     private fun darkPalette(line: Int, on: Int) = Palette(
@@ -104,8 +133,15 @@ object Palettes {
         tagFg = PAPER,
     )
 
-    private fun linePalette(line: Int, on: Int): Palette {
-        val ground = ensureContrast(line, on)
+    private fun linePalette(line: Int, preferred: Int): Palette {
+        var on = preferred
+        var ground = ensureContrast(line, on)
+        if (contrast(ground, on) < MIN_CONTRAST) {
+            // Même retouché, ce fond ne laisse pas lire le petit texte dans la couleur publiée (rouge
+            // sur blanc, par exemple) : le texte passe au noir ou au blanc.
+            on = onColor(line, null)
+            ground = ensureContrast(line, on)
+        }
         return Palette(
             isLine = true,
             background = ground,
@@ -181,11 +217,17 @@ object Palettes {
         return (0xFF000000L or value).toInt()
     }
 
-    private fun defaultColor(mode: String): Int = when (mode) {
+    /** Couleur d'un mode, pour une ligne sans couleur publiée. Le blanc s'y lit toujours. */
+    fun modeColor(mode: String): Int = when (mode) {
         "metro" -> 0xFF003CA6.toInt()
         "rail" -> 0xFF7A2E8C.toInt()
         "tram" -> 0xFF0B7A75.toInt()
         "bus" -> 0xFF2E7D32.toInt()
-        else -> 0xFF546E7A.toInt()
+        "boat" -> 0xFF00639B.toInt()
+        else -> NEUTRAL
     }
+
+    private val NEUTRAL = 0xFF546E7A.toInt()
+    private val WHITE = 0xFFFFFFFF.toInt()
+    private val BLACK = 0xFF000000.toInt()
 }

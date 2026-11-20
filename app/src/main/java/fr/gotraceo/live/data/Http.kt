@@ -5,6 +5,9 @@ import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
+import java.time.ZonedDateTime
+import java.time.format.DateTimeFormatter
+import java.time.format.DateTimeParseException
 import java.util.zip.GZIPInputStream
 
 /** Mini client HTTP (GET uniquement) basé sur HttpURLConnection. */
@@ -15,12 +18,20 @@ object Http {
 
     private const val USER_AGENT = "TraceoLive-Android/1.0"
 
+    /**
+     * Taille maximale d'une réponse lue en mémoire, une fois décompressée. La plus grosse attendue
+     * est l'index des arrêts d'un grand réseau, de l'ordre du mégaoctet : au-delà de cette limite,
+     * la réponse n'est pas la bonne, et un widget ne doit pas y laisser sa mémoire.
+     */
+    const val MAX_BODY_BYTES = 8 * 1024 * 1024
+
     @Throws(IOException::class)
     fun get(
         url: String,
         headers: Map<String, String> = emptyMap(),
         connectTimeoutMs: Int = 8_000,
         readTimeoutMs: Int = 12_000,
+        maxBytes: Int = MAX_BODY_BYTES,
     ): Response {
         val conn = URL(url).openConnection() as HttpURLConnection
         try {
@@ -48,7 +59,7 @@ object Http {
             } else {
                 raw
             }
-            val body = stream?.use { it.readBytes().toString(Charsets.UTF_8) } ?: ""
+            val body = stream?.use { readBounded(it, maxBytes).toString(Charsets.UTF_8) } ?: ""
             val responseHeaders = conn.headerFields.orEmpty().entries
                 .filter { (name, values) -> name != null && !values.isNullOrEmpty() }
                 .associate { (name, values) -> name.lowercase() to values.first() }
@@ -56,6 +67,20 @@ object Http {
         } finally {
             conn.disconnect()
         }
+    }
+
+    /** Lit le flux en entier, sans dépasser [maxBytes] : une réponse plus longue est refusée, pas tronquée. */
+    @Throws(IOException::class)
+    internal fun readBounded(input: InputStream, maxBytes: Int): ByteArray {
+        val out = java.io.ByteArrayOutputStream()
+        val buffer = ByteArray(16 * 1024)
+        while (true) {
+            val read = input.read(buffer)
+            if (read < 0) break
+            if (out.size() + read > maxBytes) throw IOException("Réponse trop volumineuse (plus de ${maxBytes / 1024} Ko)")
+            out.write(buffer, 0, read)
+        }
+        return out.toByteArray()
     }
 
     /** Lit une réponse volumineuse au fil de l'eau, sans la charger en mémoire. */
@@ -88,4 +113,11 @@ object Http {
     }
 
     fun encode(s: String): String = URLEncoder.encode(s, "UTF-8")
+
+    /** Heure d'un en-tête Date (« Fri, 20 Nov 2026 17:17:29 GMT »), en millisecondes ; null s'il est absent ou illisible. */
+    fun parseDate(value: String?): Long? = try {
+        value?.let { ZonedDateTime.parse(it.trim(), DateTimeFormatter.RFC_1123_DATE_TIME).toInstant().toEpochMilli() }
+    } catch (e: DateTimeParseException) {
+        null
+    }
 }

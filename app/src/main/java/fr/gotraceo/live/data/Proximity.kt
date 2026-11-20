@@ -55,6 +55,12 @@ data class ProximityState(
     val error: String? = null,
     val dataAt: Long? = null,
     val fresh: Boolean? = null,
+    /** Heure du réveil du réseau, où le widget doit revenir ; null s'il n'en attend pas (cf. [RefreshSchedule.wakeAt]). */
+    val wakeAt: Long? = null,
+    /** Retours déjà faits à la suite pour ce réveil. */
+    val wakeReturns: Int = 0,
+    /** Vrai si Tracéo disait le temps réel du réseau interrompu à la dernière réponse (cf. [WidgetStates.interrupted]). */
+    val interrupted: Boolean = false,
 ) {
     val isSnapshot: Boolean get() = fresh != null
 
@@ -65,6 +71,9 @@ data class ProximityState(
         .putOpt("error", error)
         .putOpt("dataAt", dataAt)
         .putOpt("fresh", fresh)
+        .putOpt("wakeAt", wakeAt)
+        .putOpt("wakeReturns", wakeReturns.takeIf { it > 0 })
+        .putOpt("interrupted", true.takeIf { interrupted })
 
     companion object {
         fun fromJson(o: JSONObject): ProximityState {
@@ -76,6 +85,9 @@ data class ProximityState(
                 error = o.optStringOrNull("error"),
                 dataAt = o.optLongOrNull("dataAt"),
                 fresh = if (o.has("fresh") && !o.isNull("fresh")) o.optBoolean("fresh") else null,
+                wakeAt = o.optLongOrNull("wakeAt"),
+                wakeReturns = o.optInt("wakeReturns"),
+                interrupted = o.optBoolean("interrupted"),
             )
         }
     }
@@ -105,7 +117,8 @@ object Proximity {
      * le plus souvent d'une requête par rangée, et une ligne sans passage laisse sa place à la suivante.
      *
      * @param rows rangées à remplir
-     * @param removeTerminusArrivals vrai pour Tracéo, qui inclut les arrivées au terminus
+     * @param removeTerminusArrivals vrai pour Tracéo, qui inclut les arrivées au terminus ; sans effet
+     *        hors Île-de-France
      * @param fetch passages d'un lot de lignes, dans le même ordre
      */
     suspend fun collect(
@@ -117,6 +130,13 @@ object Proximity {
         fetch: suspend (List<NearbyLine>) -> List<Result<PassageSnapshot>>,
     ): ProximityState {
         val limit = min(ranked.size, MAX_LINES)
+        // Les lignes classées sont toutes du réseau où l'on se trouve.
+        val networkId = ranked.firstOrNull()?.nearby?.line?.networkId
+        val returnsMade = RefreshSchedule.wakeReturnsMade(previous?.wakeAt, previous?.wakeReturns ?: 0, now)
+        fun wakeOf(responses: List<PassageSnapshot>): Long? {
+            if (networkId == null) return null
+            return RefreshSchedule.wakeAt(networkId, responses, now, returnsMade)
+        }
         val entries = ArrayList<ProximityEntry>()
         val snapshots = ArrayList<PassageSnapshot>()
         val errors = ArrayList<Throwable>()
@@ -135,6 +155,9 @@ object Proximity {
             }
             // Sans réseau, inutile d'essayer les lignes suivantes.
             if (results.all { DataSources.isNetworkFailure(it.exceptionOrNull()) }) break
+            // Le réseau se réveille : les lignes suivantes répondraient sans passage, ou à cheval sur
+            // son premier relevé. Le widget y revient d'un bloc, à l'heure annoncée.
+            if (wakeOf(results.mapNotNull { it.getOrNull() }) != null) break
         }
 
         if (snapshots.isEmpty() && errors.isNotEmpty()) {
@@ -149,6 +172,7 @@ object Proximity {
             )
         }
         val nothingToShow = visible(entries, now, rows).isEmpty()
+        val wakeAt = wakeOf(snapshots)
         return ProximityState(
             fetchedAt = now,
             attemptedAt = now,
@@ -157,12 +181,15 @@ object Proximity {
             // Plusieurs relevés : on annonce le plus ancien, et « récent » seulement si tous le sont.
             dataAt = snapshots.mapNotNull { it.dataAt }.minOrNull(),
             fresh = snapshots.mapNotNull { it.fresh }.takeIf { it.isNotEmpty() }?.all { it },
+            wakeAt = wakeAt,
+            wakeReturns = if (wakeAt != null) returnsMade else 0,
+            interrupted = networkId != null && WidgetStates.interrupted(networkId, snapshots),
         )
     }
 
     private fun entry(row: RankedLine, snapshot: PassageSnapshot?, now: Long, removeTerminusArrivals: Boolean): ProximityEntry {
         val received = snapshot?.departures.orEmpty()
-        val shown = if (removeTerminusArrivals) {
+        val shown = if (DataSources.dropsTerminusArrivals(row.nearby.line.networkId, removeTerminusArrivals)) {
             Directions.withoutTerminusArrivals(received, row.nearby.stopName)
         } else {
             received
