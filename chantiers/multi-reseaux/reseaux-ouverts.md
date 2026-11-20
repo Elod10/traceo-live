@@ -441,6 +441,27 @@ lignes, les arrêts d'une ligne, les passages, l'index et les trois 404 d'un ré
   widget le lit au retour. Un statut absent ou inconnu ne dit rien. Tracéo dit maintenant les
   horaires périmés dès le premier relevé, plus au troisième.
 
+### Premier essai sur téléphone (20 novembre 2026 au soir)
+
+APK de debug sur la préproduction. Widgets de Toulon (bateau 8M), Saint-Étienne (tram T3) et deux
+franciliens : passages, couleurs et réveil conformes. Trois remarques de l'utilisateur :
+
+- **Sens qui chargent sans fin au premier choix d'un arrêt d'un réseau endormi.** L'étape « Sens et
+  couleur » ne demandait les passages qu'une fois ; sur un réseau endormi, c'est la réponse du
+  réveil, vide, et l'écran n'y revenait pas. Corrigé : comme le widget, l'écran revient à l'heure
+  du premier relevé, deux fois au plus, sans écran d'attente, et l'aperçu du mode automatique de
+  même. Changer d'étape annule l'attente.
+- **Téléphériques sans temps réel.** Dans les captures de Tracéo d'un jour ouvré (19/11 22 h 34 →
+  20/11 19 h 25), le téléphérique du Faron (Toulon), celui de Brest et la navette Calypso de Rouen
+  n'apparaissent jamais dans le flux. Montrer leur mode ne mène qu'à « Aucun passage ». C'est au
+  serveur de le dire, lui seul voit le flux : question Q11. L'appli sait déjà traiter une ligne à
+  `realtime` faux, et ne propose que les modes que le catalogue annonce. En Île-de-France, le mode
+  « Câble / Funiculaire » n'apparaît qu'avec une clé : reste à vérifier sur téléphone si PRIM donne
+  des passages du Câble C1 et du funiculaire de Montmartre.
+- **Le Métro de Rouen.** Techniquement un tramway, mais le réseau le déclare métro dans ses
+  horaires (`route_type` 1) et tout le monde l'appelle « le Métro ». L'appli suit le mode servi ;
+  le changer serait une surcharge par ligne dans le registre de Tracéo. À trancher par l'utilisateur.
+
 ## 11. Questions à Tracéo
 
 Ce qui manquait à l'appli dans le contrat. La brique MR1 (20 novembre 2026) a répondu à toutes,
@@ -458,6 +479,7 @@ sauf Q3, reportée.
 | Q8 | La date de mise à jour du jeu de données | Fait : `attribution.updatedAt`, ou `null` | Écran des sources (lot 13) |
 | Q9 | `attribution.text` commence-t-il toujours par « Contient des informations » ? | Garanti | Rien à changer |
 | Q10 | Le statut du réseau dans la réponse des passages, pour qu'un widget sache que le temps réel est interrompu sans relire le catalogue | Fait le 20 novembre au soir, pas encore en préproduction : `status`, `ok` ou `stale`, lu au moment de la réponse ; celui du dernier relevé pendant un réveil | Lu (lot 13) : « Temps réel interrompu sur ce réseau » |
+| Q11 | Une ligne qui n'est jamais dans le flux : `realtime` faux, et son mode retiré de `modes` si aucune de ses lignes n'a de temps réel | À poser (Toulon T, Brest C, Rouen Calypso, d'après la capture du 20/11) | Elle propose aujourd'hui leur mode, qui ne mène qu'à « Aucun passage » |
 
 ## 12. Proposition : rattacher un widget après un changement d'identifiants
 

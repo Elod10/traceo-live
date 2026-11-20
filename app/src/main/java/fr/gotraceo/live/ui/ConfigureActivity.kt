@@ -53,6 +53,7 @@ import fr.gotraceo.live.data.PositionReader
 import fr.gotraceo.live.data.Prefs
 import fr.gotraceo.live.data.RankedLine
 import fr.gotraceo.live.data.ReferentialRepository
+import fr.gotraceo.live.data.RefreshSchedule
 import fr.gotraceo.live.data.SameNameStops
 import fr.gotraceo.live.data.Stop
 import fr.gotraceo.live.data.StopIndexStore
@@ -78,6 +79,7 @@ import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.IOException
@@ -1172,13 +1174,17 @@ class ConfigureActivity : Activity() {
         renderPreview()
         updateSaveEnabled()
         loadJob = scope.launch {
-            val source = Sources.passages(this@ConfigureActivity, row.nearby.line.networkId)
-            val result = withContext(Dispatchers.IO) { AutoMode.fetch(source, row.nearby) }
-            val config = AutoMode.configFor(widgetId, row.nearby, selectedTheme)
-            previewState = WidgetStates.from(
-                config, listOf(result), null, System.currentTimeMillis(), removeTerminusArrivals = !prefs.hasApiKey,
-            )
-            renderPreview()
+            val networkId = row.nearby.line.networkId
+            val source = Sources.passages(this@ConfigureActivity, networkId)
+            var returnsMade = 0
+            do {
+                val result = withContext(Dispatchers.IO) { AutoMode.fetch(source, row.nearby) }
+                val config = AutoMode.configFor(widgetId, row.nearby, selectedTheme)
+                previewState = WidgetStates.from(
+                    config, listOf(result), null, System.currentTimeMillis(), removeTerminusArrivals = !prefs.hasApiKey,
+                )
+                renderPreview()
+            } while (awaitWake(networkId, listOf(result), returnsMade++))
         }
     }
 
@@ -1318,11 +1324,28 @@ class ConfigureActivity : Activity() {
 
     // --- Sens et couleur ----------------------------------------------------------------------
 
-    private fun loadDirections() {
+    /**
+     * Si la réponse est celle d'un réseau qui se réveille (vide, son premier relevé à quelques
+     * secondes), attend ce relevé comme le fait le widget, et dit s'il faut redemander. Sans cela,
+     * le premier choix d'un arrêt d'un réseau endormi ne montrerait jamais ses sens.
+     *
+     * @param returnsMade retours déjà faits pour ce réveil, bornés comme ceux du widget
+     */
+    private suspend fun awaitWake(networkId: String, results: List<Result<PassageSnapshot>>, returnsMade: Int): Boolean {
+        val now = System.currentTimeMillis()
+        val wakeAt = RefreshSchedule.wakeAt(networkId, results.mapNotNull { it.getOrNull() }, now, returnsMade) ?: return false
+        delay((wakeAt + RefreshSchedule.WAKE_MARGIN_MS - now).coerceIn(RefreshSchedule.WAKE_MARGIN_MS, RefreshSchedule.WAKE_WINDOW_MS))
+        return true
+    }
+
+    /** @param returnsMade retours déjà faits au réveil du réseau : la liste est alors redessinée sans écran d'attente. */
+    private fun loadDirections(returnsMade: Int = 0) {
         val l = line ?: return goTo(Step.LINE)
         val s = stop ?: return goTo(Step.STOP)
-        save.isEnabled = false
-        showLoading(getString(R.string.loading_directions))
+        if (returnsMade == 0) {
+            save.isEnabled = false
+            showLoading(getString(R.string.loading_directions))
+        }
         loadJob = scope.launch {
             val source = Sources.passages(this@ConfigureActivity, l.networkId)
             val results = withContext(Dispatchers.IO) {
@@ -1378,6 +1401,8 @@ class ConfigureActivity : Activity() {
             }
             footerHelp.visibility = View.VISIBLE
             updateSaveEnabled()
+            // Changer d'étape annule ce travail, attente comprise.
+            if (awaitWake(l.networkId, directionResults, returnsMade)) loadDirections(returnsMade + 1)
         }
     }
 
