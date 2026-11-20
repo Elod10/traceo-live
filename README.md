@@ -151,8 +151,10 @@ viennent toujours de **PRIM**, la plateforme d'Île-de-France Mobilités, par l'
 ## Installation
 
 1. Télécharger l'APK :
-   - onglet **Actions** du dépôt → dernier build « Build APK » → artefact `TraceoLive-apk` ;
-   - ou, pour une version taguée `vX.Y.Z`, la page **Releases**.
+   - pour une version taguée `vX.Y.Z`, la page **Releases** ;
+   - ou, pour essayer une branche, l'onglet **Actions** du dépôt → dernier build « Build APK » →
+     artefact `TraceoLive-apk`. C'est un APK de debug : il ne s'installe pas par-dessus une version
+     de release, ni l'inverse.
 2. Sur le téléphone, autoriser l'installation d'applications de sources inconnues puis ouvrir l'APK.
 3. Android 8.0 (API 26) minimum.
 
@@ -279,15 +281,19 @@ keytool -genkeypair -v -keystore release.keystore -storetype PKCS12 \
   -alias traceolive -keyalg RSA -keysize 4096 -validity 10000
 ```
 
-Sans ces secrets (par exemple pour une pull request venant d'un fork), la CI produit seulement un APK
-de debug ; un tag `v*` échoue volontairement plutôt que de publier un APK non signé.
+Le workflow GitHub Actions `.github/workflows/android.yml` a deux étapes :
 
-Le workflow GitHub Actions `.github/workflows/android.yml` exécute les tests, construit l'APK à chaque
-push (artefact téléchargeable) et publie une release pour chaque tag `v*`. Quand la clé est disponible,
-il construit aussi le bundle signé `TraceoLive-X.Y.Z-<commit>.aab` (artefact `TraceoLive-aab`), joint à
-la release : c'est le fichier à importer dans la Play Console. La clé de release sert alors de clé
-d'importation, et Google Play signe l'application avec sa propre clé (signature d'application par
-Google Play).
+- à chaque push, et pour une pull request venant d'un fork : les tests, Android Lint (rapport en
+  artefact `lint-reports`) et un APK de debug (artefact `TraceoLive-apk`). Cette étape n'a que la
+  lecture du dépôt et ne voit pas les secrets ;
+- pour un tag `v*` seulement : l'APK et le bundle signés, `TraceoLive-X.Y.Z-<commit>.apk` et
+  `TraceoLive-X.Y.Z-<commit>.aab`, joints à la release. Le `.aab` est le fichier à importer dans la Play
+  Console. La clé de release sert alors de clé d'importation, et Google Play signe l'application avec sa
+  propre clé (signature d'application par Google Play). Sans les secrets, le tag échoue volontairement
+  plutôt que de publier un APK non signé.
+
+Un lancement manuel (« Run workflow ») peut aussi produire l'APK et le bundle signés en cochant
+« Produire un APK et un AAB de release signés », sans publier de release.
 
 ## Licence
 
