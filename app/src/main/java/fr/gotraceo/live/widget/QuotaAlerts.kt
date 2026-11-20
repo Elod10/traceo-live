@@ -10,6 +10,7 @@ import fr.gotraceo.live.R
 import fr.gotraceo.live.data.Prefs
 import fr.gotraceo.live.data.PrimClient
 import fr.gotraceo.live.data.PrimDay
+import fr.gotraceo.live.data.PrimUsage
 import fr.gotraceo.live.ui.KeyActivity
 import java.text.NumberFormat
 import java.util.Locale
@@ -29,14 +30,26 @@ object QuotaAlerts {
         return object : PrimClient.UsageListener {
             override fun onResponse(remainingDay: Int?, limitDay: Int?) {
                 val today = PrimDay.today()
-                val usage = prefs.updatePrimUsage { it.recorded(today, remainingDay, limitDay) }
+                // L'alerte est marquée comme faite dans la même écriture que le décompte : deux réponses
+                // simultanées n'en envoient pas deux.
+                var warned: PrimUsage? = null
+                val usage = prefs.updatePrimUsage { previous ->
+                    val next = previous.recorded(today, remainingDay, limitDay)
+                    if (next.needsWarning(today)) {
+                        warned = next
+                        next.copy(warnedDay = today)
+                    } else {
+                        next
+                    }
+                }
                 when {
                     usage.isExhausted(today) -> fallbackOnce(app, prefs, today)
-                    usage.needsWarning(today) -> {
-                        prefs.updatePrimUsage { it.copy(warnedDay = today) }
-                        notify(app, app.getString(R.string.quota_warning_title), app.getString(
-                            R.string.quota_warning_body, number(usage.used), number(usage.quota),
-                        ))
+                    else -> warned?.let {
+                        notify(
+                            app,
+                            app.getString(R.string.quota_warning_title),
+                            app.getString(R.string.quota_warning_body, number(it.used), number(it.quota)),
+                        )
                     }
                 }
             }
