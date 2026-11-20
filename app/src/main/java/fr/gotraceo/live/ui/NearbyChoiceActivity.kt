@@ -3,8 +3,10 @@ package fr.gotraceo.live.ui
 import android.app.Activity
 import android.appwidget.AppWidgetManager
 import android.content.Context
+import android.graphics.Bitmap
 import android.os.Bundle
 import android.text.method.LinkMovementMethod
+import android.util.LruCache
 import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.View
@@ -17,6 +19,7 @@ import android.widget.ListView
 import android.widget.TextView
 import fr.gotraceo.live.R
 import fr.gotraceo.live.data.Directions
+import fr.gotraceo.live.data.Line
 import fr.gotraceo.live.data.NearbyLine
 import fr.gotraceo.live.data.PassageSnapshot
 import fr.gotraceo.live.data.Prefs
@@ -168,6 +171,7 @@ class NearbyChoiceActivity : Activity() {
         private val onStar: (Row) -> Unit,
     ) : BaseAdapter() {
         private val inflater = LayoutInflater.from(context)
+        private val badgeCache = LruCache<String, Bitmap>(32)
         private var rows: List<Row> = emptyList()
         private val favorites = favorites.toMutableSet()
 
@@ -197,7 +201,7 @@ class NearbyChoiceActivity : Activity() {
             val view = convertView ?: inflater.inflate(R.layout.item_nearby, parent, false)
             val row = getItem(position)
             val line = row.nearby.line
-            view.findViewById<ImageView>(R.id.nearby_badge).setImageBitmap(BadgeRenderer.render(context, line, BADGE_DP))
+            view.findViewById<ImageView>(R.id.nearby_badge).setImageBitmap(badgeFor(line))
             view.findViewById<TextView>(R.id.nearby_stop).text = row.nearby.stopName
             view.findViewById<TextView>(R.id.nearby_detail).text = detail(row, line.id == shownLineId)
             val wait = view.findViewById<TextView>(R.id.nearby_wait)
@@ -215,6 +219,11 @@ class NearbyChoiceActivity : Activity() {
             )
             star.setOnClickListener { onStar(row) }
             return view
+        }
+
+        private fun badgeFor(line: Line): Bitmap {
+            val key = "${line.mode}|${line.shortName}|${line.color}|${line.textColor}"
+            return badgeCache.get(key) ?: BadgeRenderer.render(context, line, BADGE_DP).also { badgeCache.put(key, it) }
         }
 
         private fun detail(row: Row, shown: Boolean): String {
