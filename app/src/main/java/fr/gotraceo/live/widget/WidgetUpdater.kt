@@ -53,6 +53,7 @@ object WidgetUpdater {
 
     private const val TAG = "TRWidget"
     private const val MAX_PARALLEL_REQUESTS = 4
+    private const val MIN_ALARM_DELAY_MS = 2_000L
     private val RENDER_QUALITIES = listOf(1f, 0.7f, 0.5f)
 
     private val mutex = Mutex()
@@ -317,7 +318,10 @@ object WidgetUpdater {
         val timing = Timing.of(prefs)
         // Le tick de chaque minute, ou plus tôt si un widget est dû avant (prochain relevé de Tracéo).
         val nextDue = ids.asList().mapNotNull { timing.dueAt(context, prefs, it) }.filter { it > now }.minOrNull()
-        val trigger = minOf(RefreshSchedule.nextTickAt(now, prefs.refreshOffsetMs), nextDue ?: Long.MAX_VALUE)
+        val trigger = maxOf(
+            now + MIN_ALARM_DELAY_MS,
+            minOf(RefreshSchedule.nextTickAt(now, prefs.refreshOffsetMs), nextDue ?: Long.MAX_VALUE),
+        )
         // RTC (non réveillant) : rien n'est exécuté tant que l'écran est éteint.
         try {
             if (canUseExactAlarms(alarmManager)) {
