@@ -9,7 +9,9 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.util.Log
 import fr.gotraceo.live.R
 import fr.gotraceo.live.data.Prefs
@@ -19,6 +21,7 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.atomic.AtomicInteger
@@ -32,12 +35,15 @@ import java.util.concurrent.atomic.AtomicInteger
 class AutoLocateService : Service() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val mainHandler = Handler(Looper.getMainLooper())
     private val running = ConcurrentHashMap.newKeySet<Int>()
     private val active = AtomicInteger()
+    private var lastStartId = 0
 
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        lastStartId = startId
         val app = applicationContext
         val widgetId = intent?.getIntExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, AppWidgetManager.INVALID_APPWIDGET_ID)
             ?: AppWidgetManager.INVALID_APPWIDGET_ID
@@ -76,11 +82,13 @@ class AutoLocateService : Service() {
             }
             try {
                 redrawWhenWindowsEnd(app, widgetId)
-                AutoMode.refreshIndexIfStale(app)
+                withContext(Dispatchers.IO) { AutoMode.refreshIndexIfStale(app) }
             } catch (t: Exception) {
                 Log.w(TAG, "Échec après la mise à jour du widget", t)
             } finally {
-                if (active.decrementAndGet() == 0) stopSelf()
+                if (active.decrementAndGet() == 0) {
+                    mainHandler.post { stopWhenIdle() }
+                }
             }
         }
         return START_NOT_STICKY
@@ -100,7 +108,7 @@ class AutoLocateService : Service() {
     }
 
     private fun stopWhenIdle() {
-        if (active.get() == 0) stopSelf()
+        if (active.get() == 0) stopSelfResult(lastStartId)
     }
 
     private fun promote(): Boolean = try {

@@ -493,9 +493,14 @@ object WidgetContent {
         if (model.stopName.isNotEmpty()) parts += model.stopName
         val header = parts.joinToString(", ")
         val body = model.groups.joinToString(" ") { group ->
+            val first = group.first
+            val platform = first.platform?.trim()
+                ?.takeIf { it.isNotEmpty() && first.kind != WaitKind.CANCELLED }
+                ?.let { ", ${first.platformLabel.lowercase()} $it" }
+                .orEmpty()
+            val delay = if (first.isDelayed) ", retard de ${first.delayMinutes} minutes" else ""
             val then = group.next?.let { ", puis ${it.spokenWait}" }.orEmpty()
-            val delay = if (group.first.isDelayed) ", retard de ${group.first.delayMinutes} minutes" else ""
-            "Vers ${group.label} : ${group.first.spokenWait}$delay$then."
+            "Vers ${group.label} : ${first.spokenWait}$platform$delay$then."
         }
         val stale = if (model.stale) " Actualisation impossible, données de ${model.timeLabel}." else ""
         val hint = model.autoHint?.let { " $it." }.orEmpty()

@@ -15,6 +15,7 @@ import fr.gotraceo.live.data.Prefs
 import fr.gotraceo.live.data.PrimClient
 import fr.gotraceo.live.data.PrimDay
 import fr.gotraceo.live.data.PrimException
+import fr.gotraceo.live.data.PrimUsage
 import fr.gotraceo.live.widget.QuotaAlerts
 import fr.gotraceo.live.widget.WidgetUpdater
 import kotlinx.coroutines.Dispatchers
@@ -73,7 +74,7 @@ class KeyActivity : Activity() {
         findViewById<ProgressBar>(R.id.key_usage_bar).apply {
             max = usage.quota
             progress = usage.used.coerceAtMost(usage.quota)
-            val alert = exhausted || usage.used >= usage.quota * 0.8
+            val alert = exhausted || usage.used >= usage.quota * PrimUsage.WARNING_SHARE
             progressTintList = getColorStateList(if (alert) R.color.error_text else R.color.text_primary)
         }
         findViewById<TextView>(R.id.key_usage_help).apply {
@@ -112,28 +113,49 @@ class KeyActivity : Activity() {
 
     private fun testKey() {
         // « Tester » avec un champ vide ne doit pas retirer la clé enregistrée.
-        if (keyInput.text.isNullOrBlank()) {
+        val key = keyInput.text?.toString()?.trim().orEmpty()
+        if (key.isEmpty()) {
             showStatus(getString(R.string.main_key_empty), error = true)
             return
         }
-        saveKey()
-        val key = prefs.apiKey
+        val alreadySaved = key == prefs.apiKey
+        var observedRemaining: Int? = null
+        var observedLimit: Int? = null
+        val listener = if (alreadySaved) {
+            QuotaAlerts.listener(this)
+        } else {
+            // La clé n'est enregistrée que si le test réussit : ne pas imputer l'essai à l'ancienne.
+            object : PrimClient.UsageListener {
+                override fun onResponse(remainingDay: Int?, limitDay: Int?) {
+                    observedRemaining = remainingDay
+                    observedLimit = limitDay
+                }
+            }
+        }
         keyTest.isEnabled = false
         showStatus(getString(R.string.main_key_testing), error = false)
         scope.launch {
             val error = withContext(Dispatchers.IO) {
                 try {
-                    PrimClient(key, usage = QuotaAlerts.listener(this@KeyActivity)).testKey()
+                    PrimClient(key, usage = listener).testKey()
                     null
                 } catch (e: PrimException) {
                     e
                 }
             }
             keyTest.isEnabled = true
-            showUsage()
             if (error == null) {
+                if (!alreadySaved) {
+                    prefs.apiKey = key
+                    prefs.resetPrimUsage()
+                    prefs.updatePrimUsage { it.recorded(PrimDay.today(), observedRemaining, observedLimit) }
+                    WidgetUpdater.renderAll(this@KeyActivity)
+                    WidgetUpdater.requestRefresh(this@KeyActivity)
+                }
+                showUsage()
                 showStatus(getString(R.string.main_key_ok), error = false)
             } else {
+                showUsage()
                 showStatus(error.message.orEmpty(), error = true)
             }
         }

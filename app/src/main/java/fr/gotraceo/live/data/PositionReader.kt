@@ -48,7 +48,11 @@ class PositionReader(context: Context) {
     suspend fun read(timeoutMs: Long = TIMEOUT_MS): PositionFix? {
         val lm = manager ?: return null
         if (!hasPreciseAccess) return null
-        val enabled = lm.getProviders(true)
+        val enabled = try {
+            lm.getProviders(true)
+        } catch (e: SecurityException) {
+            return null
+        }
         recent(lm, enabled, GOOD_AGE_MS, GOOD_ACCURACY_M)?.let { return it.toFix() }
 
         val providers = listOf(FUSED_PROVIDER, LocationManager.NETWORK_PROVIDER, LocationManager.GPS_PROVIDER)
@@ -81,7 +85,12 @@ class PositionReader(context: Context) {
     private fun request(lm: LocationManager, provider: String, offer: (Location?) -> Unit): () -> Unit {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
             val signal = CancellationSignal()
-            lm.getCurrentLocation(provider, signal, app.mainExecutor, Consumer { offer(it) })
+            try {
+                lm.getCurrentLocation(provider, signal, app.mainExecutor, Consumer { offer(it) })
+            } catch (e: SecurityException) {
+                offer(null)
+                return {}
+            }
             return { signal.cancel() }
         }
         // Avant Android 11, toutes les méthodes de l'interface doivent être implémentées.
@@ -100,9 +109,21 @@ class PositionReader(context: Context) {
             override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) = Unit
 
             override fun onProviderEnabled(provider: String) = Unit
-            override fun onProviderDisabled(provider: String) = Unit
+
+            override fun onProviderDisabled(provider: String) {
+                if (!answered) {
+                    answered = true
+                    offer(null)
+                }
+                lm.removeUpdates(this)
+            }
         }
-        lm.requestLocationUpdates(provider, 0L, 0f, listener, Looper.getMainLooper())
+        try {
+            lm.requestLocationUpdates(provider, 0L, 0f, listener, Looper.getMainLooper())
+        } catch (e: SecurityException) {
+            offer(null)
+            return {}
+        }
         return { lm.removeUpdates(listener) }
     }
 
@@ -112,6 +133,8 @@ class PositionReader(context: Context) {
             try {
                 lm.getLastKnownLocation(provider)
             } catch (e: IllegalArgumentException) {
+                null
+            } catch (e: SecurityException) {
                 null
             }
         }

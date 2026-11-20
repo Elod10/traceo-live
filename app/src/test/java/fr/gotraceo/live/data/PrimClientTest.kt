@@ -175,6 +175,7 @@ class PrimClientTest {
         expectKind(PrimException.Kind.QUOTA) { client().departures("IDFM:2", null) }
         forcedStatus = 503
         expectKind(PrimException.Kind.SERVER) { client().departures("IDFM:2", null) }
+        expectKind(PrimException.Kind.SERVER) { client("wrong").testKey() }
     }
 
     @Test

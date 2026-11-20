@@ -4,7 +4,13 @@ import java.io.IOException
 import java.util.Locale
 
 /** Erreur lors d'un appel à l'API PRIM, avec un message lisible par l'utilisateur. */
-class PrimException(val kind: Kind, message: String, cause: Throwable? = null) : Exception(message, cause) {
+class PrimException(
+    val kind: Kind,
+    message: String,
+    cause: Throwable? = null,
+    /** Vrai si l'erreur vient d'une réponse SIRI reconnue : PRIM a donc accepté la clé. */
+    val fromSiri: Boolean = false,
+) : Exception(message, cause) {
     enum class Kind { NO_KEY, AUTH, QUOTA, NETWORK, UNKNOWN_STOP, SERVER, INVALID_RESPONSE }
 }
 
@@ -156,8 +162,9 @@ class PrimClient(
         try {
             request(TEST_MONITORING_REF, null, "")
         } catch (e: PrimException) {
-            // Une erreur fonctionnelle SIRI signifie que la clé a bien été acceptée.
-            if (e.kind == PrimException.Kind.UNKNOWN_STOP || e.kind == PrimException.Kind.SERVER) return
+            // Une erreur dans une réponse SIRI signifie que la clé a bien été acceptée. Une panne
+            // devant PRIM (HTTP 5xx sans réponse SIRI) ne dit rien de la clé.
+            if (e.fromSiri) return
             throw e
         }
     }
@@ -206,11 +213,11 @@ class PrimClient(
         if (parsed.departures.isEmpty() && parsed.errorText != null) {
             if (isNoData(parsed.errorText)) return emptyList()
             val kind = if (isUnknownIdentifier(parsed.errorText)) PrimException.Kind.UNKNOWN_STOP else PrimException.Kind.SERVER
-            throw PrimException(kind, "PRIM : ${parsed.errorText}")
+            throw PrimException(kind, "PRIM : ${parsed.errorText}", fromSiri = true)
         }
         if (response.code !in 200..299 && parsed.departures.isEmpty()) {
             val kind = if (response.code == 400 || response.code == 404) PrimException.Kind.UNKNOWN_STOP else PrimException.Kind.SERVER
-            throw PrimException(kind, "Erreur PRIM (HTTP ${response.code})")
+            throw PrimException(kind, "Erreur PRIM (HTTP ${response.code})", fromSiri = true)
         }
         return parsed.departures
     }

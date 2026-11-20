@@ -162,7 +162,9 @@ object Proximity {
 
     private fun entry(row: RankedLine, snapshot: PassageSnapshot?, now: Long, removeTerminusArrivals: Boolean): ProximityEntry {
         val received = snapshot?.departures.orEmpty()
-        val shown = if (removeTerminusArrivals) {
+        // Tracéo inclut les arrivées au terminus, y compris en repli d'une clé dont le quota est épuisé.
+        val viaTraceo = removeTerminusArrivals || snapshot?.viaTraceo == true
+        val shown = if (viaTraceo) {
             Directions.withoutTerminusArrivals(received, row.nearby.stopName)
         } else {
             received

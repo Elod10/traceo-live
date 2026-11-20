@@ -53,6 +53,7 @@ object WidgetUpdater {
 
     private const val TAG = "TRWidget"
     private const val MAX_PARALLEL_REQUESTS = 4
+    private const val MIN_ALARM_DELAY_MS = 2_000L
     private val RENDER_QUALITIES = listOf(1f, 0.7f, 0.5f)
 
     private val mutex = Mutex()
@@ -262,7 +263,7 @@ object WidgetUpdater {
     // --- Planification du tick -------------------------------------------------------------
 
     private fun alarmIntent(context: Context, action: String): PendingIntent {
-        val intent = Intent(context, DeparturesWidgetProvider::class.java).setAction(action)
+        val intent = Intent(context, WidgetActionReceiver::class.java).setAction(action)
         return PendingIntent.getBroadcast(
             context, 0, intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
@@ -282,6 +283,26 @@ object WidgetUpdater {
         }
     }
 
+    /**
+     * Après une mise à jour de l'application : retire le tick et le filet de sécurité programmés par
+     * les versions jusqu'à 2.0.4, qui visaient le widget lui-même. Le widget ne les traite plus, et le
+     * filet, répété, le réveillerait encore toutes les quelques minutes.
+     */
+    fun cancelLegacyAlarms(context: Context) {
+        val alarmManager = context.getSystemService(AlarmManager::class.java) ?: return
+        for (action in listOf(ACTION_TICK, ACTION_WATCHDOG)) {
+            val intent = Intent(context, DeparturesWidgetProvider::class.java).setAction(action)
+            val legacy = PendingIntent.getBroadcast(
+                context, 0, intent,
+                PendingIntent.FLAG_NO_CREATE or PendingIntent.FLAG_IMMUTABLE,
+            )
+            if (legacy != null) {
+                alarmManager.cancel(legacy)
+                legacy.cancel()
+            }
+        }
+    }
+
     private fun setAlarms(context: Context) {
         val alarmManager = context.getSystemService(AlarmManager::class.java) ?: return
         val tick = alarmIntent(context, ACTION_TICK)
@@ -297,7 +318,10 @@ object WidgetUpdater {
         val timing = Timing.of(prefs)
         // Le tick de chaque minute, ou plus tôt si un widget est dû avant (prochain relevé de Tracéo).
         val nextDue = ids.asList().mapNotNull { timing.dueAt(context, prefs, it) }.filter { it > now }.minOrNull()
-        val trigger = minOf(RefreshSchedule.nextTickAt(now, prefs.refreshOffsetMs), nextDue ?: Long.MAX_VALUE)
+        val trigger = maxOf(
+            now + MIN_ALARM_DELAY_MS,
+            minOf(RefreshSchedule.nextTickAt(now, prefs.refreshOffsetMs), nextDue ?: Long.MAX_VALUE),
+        )
         // RTC (non réveillant) : rien n'est exécuté tant que l'écran est éteint.
         try {
             if (canUseExactAlarms(alarmManager)) {
@@ -333,7 +357,7 @@ object WidgetUpdater {
 
     /** Demande une actualisation immédiate (depuis l'application). */
     fun requestRefresh(context: Context, widgetId: Int? = null) {
-        val intent = Intent(context, DeparturesWidgetProvider::class.java).setAction(ACTION_REFRESH)
+        val intent = Intent(context, WidgetActionReceiver::class.java).setAction(ACTION_REFRESH)
         if (widgetId != null) intent.putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, widgetId)
         context.sendBroadcast(intent)
     }
@@ -343,6 +367,6 @@ object WidgetUpdater {
      * sont actualisés, les autres redessinés, et le tick suivant est programmé.
      */
     fun requestTick(context: Context) {
-        context.sendBroadcast(Intent(context, DeparturesWidgetProvider::class.java).setAction(ACTION_TICK))
+        context.sendBroadcast(Intent(context, WidgetActionReceiver::class.java).setAction(ACTION_TICK))
     }
 }

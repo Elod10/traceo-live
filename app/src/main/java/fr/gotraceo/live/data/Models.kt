@@ -316,12 +316,15 @@ fun JSONArray?.toStringList(): List<String> {
     return (0 until length()).mapNotNull { i -> optString(i).takeIf { it.isNotBlank() } }
 }
 
+private val COMBINING_MARKS = Regex("\\p{M}+")
+private val LABEL_SEPARATORS = Regex("[\\s\\-'’]+")
+
 /** Normalise un libellé pour les comparaisons (minuscules, sans accents ni espaces superflus). */
 fun normalizeLabel(s: String?): String {
     if (s == null) return ""
     val decomposed = Normalizer.normalize(s.trim(), Normalizer.Form.NFD)
-    return decomposed.replace(Regex("\\p{M}+"), "")
+    return decomposed.replace(COMBINING_MARKS, "")
         .lowercase(Locale.ROOT)
-        .replace(Regex("[\\s\\-'’]+"), " ")
+        .replace(LABEL_SEPARATORS, " ")
         .trim()
 }

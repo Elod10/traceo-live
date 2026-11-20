@@ -29,6 +29,8 @@ import fr.gotraceo.live.data.WidgetTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.IOException
@@ -46,6 +48,7 @@ object AutoMode {
 
     private const val TAG = "TRWidget"
     private const val INDEX_FILE = "stop_index.bin"
+    private const val MAX_PARALLEL_REQUESTS = 4
 
     /** Widgets dont la position est en cours de lecture : la feuille de choix l'attend. */
     private val locating: MutableSet<Int> = ConcurrentHashMap.newKeySet()
@@ -228,7 +231,11 @@ object AutoMode {
                 applied = true
             }
         }
-        if (!applied) WidgetUpdater.refresh(app, intArrayOf(widgetId), force = true)
+        if (!applied) {
+            WidgetUpdater.refresh(app, intArrayOf(widgetId), force = true)
+        } else {
+            WidgetUpdater.scheduleTick(app)
+        }
         if (tookOver(widgetId, tappedAt)) return
 
         val lines = ranking?.list.orEmpty()
@@ -265,6 +272,7 @@ object AutoMode {
         val point = auto.anchor ?: auto.last
         val ranked = withContext(Dispatchers.IO) { point?.let { rankingEnsuringIndex(app, it) } }?.list.orEmpty()
         val source = Sources.proximity(app)
+        val parallel = Semaphore(MAX_PARALLEL_REQUESTS)
         val state = Proximity.collect(
             ranked = ranked,
             rows = proximityRows(app, widgetId),
@@ -272,7 +280,7 @@ object AutoMode {
             previous = prefs.proximity(widgetId),
             removeTerminusArrivals = !prefs.usesPrim,
         ) { batch ->
-            withContext(Dispatchers.IO) { batch.map { async { source(it) } }.awaitAll() }
+            withContext(Dispatchers.IO) { batch.map { async { parallel.withPermit { source(it) } } }.awaitAll() }
         }
         prefs.saveProximity(widgetId, state)
     }

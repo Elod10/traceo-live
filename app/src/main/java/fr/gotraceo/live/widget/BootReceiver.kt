@@ -12,7 +12,12 @@ import android.content.Intent
 class BootReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         when (intent.action) {
-            Intent.ACTION_BOOT_COMPLETED, Intent.ACTION_MY_PACKAGE_REPLACED -> {
+            Intent.ACTION_BOOT_COMPLETED -> {
+                WidgetUpdater.renderAll(context)
+                WidgetUpdater.scheduleTick(context)
+            }
+            Intent.ACTION_MY_PACKAGE_REPLACED -> {
+                WidgetUpdater.cancelLegacyAlarms(context)
                 WidgetUpdater.renderAll(context)
                 WidgetUpdater.scheduleTick(context)
             }
