@@ -201,7 +201,9 @@ class NearbyChoiceActivity : Activity() {
             val view = convertView ?: inflater.inflate(R.layout.item_nearby, parent, false)
             val row = getItem(position)
             val line = row.nearby.line
-            view.findViewById<ImageView>(R.id.nearby_badge).setImageBitmap(badgeFor(line))
+            val badge = view.findViewById<ImageView>(R.id.nearby_badge)
+            badge.setImageBitmap(badgeFor(line))
+            badge.contentDescription = UiText.lineTitle(line)
             view.findViewById<TextView>(R.id.nearby_stop).text = row.nearby.stopName
             view.findViewById<TextView>(R.id.nearby_detail).text = detail(row, line.id == shownLineId)
             val wait = view.findViewById<TextView>(R.id.nearby_wait)
