@@ -17,7 +17,10 @@ class FakeServer {
     class Request(val path: String, val target: String, val headers: Map<String, String>)
 
     val requests: MutableList<Request> = Collections.synchronizedList(ArrayList())
-    private val responses = HashMap<String, MutableList<Pair<Int, String>>>()
+    private val responses = HashMap<String, MutableList<Reply>>()
+
+    /** Une réponse enregistrée : statut, corps, et en-têtes en plus de ceux de toute réponse. */
+    private class Reply(val status: Int, val body: String, val headers: Map<String, String>)
     private val socket = ServerSocket(0, 50, InetAddress.getByName("127.0.0.1"))
 
     /** Adresse à donner au client testé. */
@@ -39,8 +42,8 @@ class FakeServer {
     fun close() = socket.close()
 
     /** Ajoute une réponse pour ce chemin : elles sont servies dans l'ordre, la dernière se répète. */
-    fun respond(path: String, status: Int, body: String) {
-        synchronized(responses) { responses.getOrPut(path) { ArrayList() }.add(status to body) }
+    fun respond(path: String, status: Int, body: String, headers: Map<String, String> = emptyMap()) {
+        synchronized(responses) { responses.getOrPut(path) { ArrayList() }.add(Reply(status, body, headers)) }
     }
 
     /** Oublie les réponses enregistrées. */
@@ -48,8 +51,8 @@ class FakeServer {
 
     fun paths(): List<String> = requests.map { it.path }
 
-    private fun nextResponse(path: String): Pair<Int, String> = synchronized(responses) {
-        val queue = responses[path] ?: return@synchronized 500 to "{}"
+    private fun nextResponse(path: String): Reply = synchronized(responses) {
+        val queue = responses[path] ?: return@synchronized Reply(500, "{}", emptyMap())
         if (queue.size > 1) queue.removeAt(0) else queue.first()
     }
 
@@ -67,12 +70,13 @@ class FakeServer {
         val path = target.substringBefore('?')
         requests += Request(path, target, headers)
 
-        val (status, body) = nextResponse(path)
-        if (status == DROP) return
-        val bytes = body.toByteArray(Charsets.UTF_8)
+        val reply = nextResponse(path)
+        if (reply.status == DROP) return
+        val bytes = reply.body.toByteArray(Charsets.UTF_8)
+        val extra = reply.headers.entries.joinToString("") { (name, value) -> "$name: $value\r\n" }
         val out = client.getOutputStream()
         out.write(
-            ("HTTP/1.1 $status X\r\nContent-Type: application/json; charset=utf-8\r\n" +
+            ("HTTP/1.1 ${reply.status} X\r\nContent-Type: application/json; charset=utf-8\r\n" + extra +
                 "Content-Length: ${bytes.size}\r\nConnection: close\r\n\r\n").toByteArray(Charsets.UTF_8),
         )
         out.write(bytes)

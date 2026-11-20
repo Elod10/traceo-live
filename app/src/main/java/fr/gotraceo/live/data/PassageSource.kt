@@ -16,6 +16,11 @@ data class PassageSnapshot(
     val nextAt: Long? = null,
     /** Vrai si la réponse vient du cache de Tracéo, y compris en repli quand le quota PRIM est atteint. */
     val viaTraceo: Boolean = false,
+    /**
+     * Ce que Tracéo dit du réveil du réseau (`waking`) : vrai tant que son premier relevé n'est pas
+     * fini, faux sinon, réussi ou non ; null s'il ne le dit pas (Île-de-France, ancien serveur).
+     */
+    val waking: Boolean? = null,
 )
 
 /** Une source de passages. Les erreurs sont levées en exceptions au message lisible par l'utilisateur. */
@@ -278,11 +283,15 @@ object WidgetStates {
         } else {
             received
         }
+        // Hors Île-de-France, Tracéo répond pour la station entière quel que soit le quai demandé : un
+        // arrêt qui réunit deux quais recevrait chaque passage deux fois. Les doublons ne sont retirés
+        // qu'après le filtre des sens, qui se lit par quai.
         val filtered = Directions.upcoming(Directions.filter(shown, config.directions), now)
+            .let { kept -> if (Networks.isIdfm(config.networkId)) kept else kept.distinctBy { it.copy(stopId = "") } }
         val fresh = snapshots.mapNotNull { it.fresh }.takeIf { it.isNotEmpty() }?.all { it }
         // Le réseau se réveillait : le widget y revient à l'heure annoncée, un nombre borné de fois.
         val returnsMade = RefreshSchedule.wakeReturnsMade(previous?.wakeAt, previous?.wakeReturns ?: 0, now)
-        val wakeAt = RefreshSchedule.wakeAt(config.networkId, fresh, snapshots.mapNotNull { it.nextAt }.minOrNull(), now, returnsMade)
+        val wakeAt = RefreshSchedule.wakeAt(config.networkId, snapshots, now, returnsMade)
         // Hors Île-de-France, un arrêt peut réunir deux identifiants. Si le réseau n'en connaît plus
         // qu'un, le widget ne montre plus qu'un sens : il le dit, même s'il lui reste des passages.
         val gone = errors.firstOrNull { it is TraceoException && it.kind == TraceoException.Kind.NOT_FOUND }

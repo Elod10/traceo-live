@@ -130,9 +130,8 @@ object Proximity {
         val networkId = ranked.firstOrNull()?.nearby?.line?.networkId
         val returnsMade = RefreshSchedule.wakeReturnsMade(previous?.wakeAt, previous?.wakeReturns ?: 0, now)
         fun wakeOf(responses: List<PassageSnapshot>): Long? {
-            if (networkId == null || responses.isEmpty()) return null
-            val fresh = responses.mapNotNull { it.fresh }.takeIf { it.isNotEmpty() }?.all { it }
-            return RefreshSchedule.wakeAt(networkId, fresh, responses.mapNotNull { it.nextAt }.minOrNull(), now, returnsMade)
+            if (networkId == null) return null
+            return RefreshSchedule.wakeAt(networkId, responses, now, returnsMade)
         }
         val entries = ArrayList<ProximityEntry>()
         val snapshots = ArrayList<PassageSnapshot>()

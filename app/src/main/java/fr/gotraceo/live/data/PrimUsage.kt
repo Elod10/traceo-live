@@ -122,7 +122,8 @@ object RefreshSchedule {
     /**
      * Un réseau hors Île-de-France n'est relevé que quand on le demande. Quand il dormait, sa réponse
      * n'a pas de relevé récent et annonce le prochain pour dans quelques secondes : c'est l'heure de
-     * son réveil. Au-delà de ce délai, l'annonce est celle de sa cadence ordinaire.
+     * son réveil. Au-delà de ce délai, l'annonce est celle de sa cadence ordinaire. Quand Tracéo dit
+     * lui-même que le réseau se réveille, ce délai borne seulement l'heure du retour.
      */
     const val WAKE_WINDOW_MS = 20_000L
 
@@ -139,17 +140,22 @@ object RefreshSchedule {
     const val WAKE_GRACE_MS = 30_000L
 
     /**
-     * Retours accordés à la suite pour un même réveil. Une réponse sans relevé récent qui annonce
-     * le prochain tout près n'est pas toujours un réveil : un flux en panne en donne aussi. Sans
-     * cette borne, le widget redemanderait toutes les quelques secondes tant que la panne dure.
+     * Retours accordés à la suite pour un même réveil. Sans l'indication de Tracéo, une réponse sans
+     * relevé récent qui annonce le prochain tout près n'est pas toujours un réveil : un flux en panne
+     * en donne aussi. Avec elle, un réveil qui dure au-delà de deux retours n'est plus normal. Sans
+     * cette borne, le widget redemanderait toutes les quelques secondes tant que cela dure.
      */
     const val WAKE_MAX_RETURNS = 2
 
     /**
      * Heure à laquelle revenir après une réponse, ou null si elle n'est pas celle d'un réseau qui se
-     * réveille : relevé récent, prochain relevé annoncé à sa cadence, ou retours épuisés. Le widget
-     * y revient au lieu d'attendre un intervalle entier sans passage. L'Île-de-France, relevée en
-     * continu, ne se réveille pas.
+     * réveille. Le widget y revient au lieu d'attendre un intervalle entier sans passage.
+     * L'Île-de-France, relevée en continu, ne se réveille pas.
+     *
+     * Tracéo dit lui-même si le réseau se réveille (`waking`) : c'est alors sa réponse qui tranche,
+     * et un flux en panne n'est plus pris pour un réveil. Sans cette indication (ancien serveur), le
+     * réveil se déduit d'une réponse sans relevé récent qui annonce le prochain dans quelques
+     * secondes. Dans les deux cas, les retours sont bornés.
      *
      * Chaque widget en décide d'après ses propres réponses : celle d'un autre widget du même
      * réseau, arrivée après le relevé, ne doit pas annuler son retour.
@@ -158,11 +164,32 @@ object RefreshSchedule {
      * @param nextAt `nextAt` de cette réponse, null si le réseau n'annonce rien
      * @param now heure de la réponse
      * @param returnsMade retours déjà faits à la suite pour ce réveil (cf. [wakeReturnsMade])
+     * @param waking ce que Tracéo dit du réveil, null s'il ne dit rien
      */
-    fun wakeAt(networkId: String, fresh: Boolean?, nextAt: Long?, now: Long, returnsMade: Int): Long? {
-        if (Networks.isIdfm(networkId) || fresh != false || nextAt == null || nextAt <= 0L) return null
-        if (returnsMade >= WAKE_MAX_RETURNS || nextAt - now !in 0..WAKE_WINDOW_MS) return null
+    fun wakeAt(networkId: String, fresh: Boolean?, nextAt: Long?, now: Long, returnsMade: Int, waking: Boolean? = null): Long? {
+        if (Networks.isIdfm(networkId) || nextAt == null || nextAt <= 0L || returnsMade >= WAKE_MAX_RETURNS) return null
+        if (waking != null) {
+            // Une heure annoncée hors de propos (horloge du téléphone décalée, en-tête Date absent)
+            // ne doit ni faire manquer le retour, ni le repousser au-delà du délai d'un réveil.
+            return if (waking) nextAt.coerceIn(now, now + WAKE_WINDOW_MS) else null
+        }
+        if (fresh != false || nextAt - now !in 0..WAKE_WINDOW_MS) return null
         return nextAt
+    }
+
+    /**
+     * Heure du retour d'après toutes les réponses d'une actualisation (un arrêt qui réunit plusieurs
+     * quais, un lot de lignes À proximité) : il suffit que l'une dise que le réseau se réveille.
+     */
+    fun wakeAt(networkId: String, responses: List<PassageSnapshot>, now: Long, returnsMade: Int): Long? {
+        if (responses.isEmpty()) return null
+        val said = responses.mapNotNull { it.waking }
+        if (said.isNotEmpty()) {
+            val nextAt = responses.filter { it.waking == true }.mapNotNull { it.nextAt }.minOrNull()
+            return wakeAt(networkId, false, nextAt, now, returnsMade, waking = said.any { it })
+        }
+        val fresh = responses.mapNotNull { it.fresh }.takeIf { it.isNotEmpty() }?.all { it }
+        return wakeAt(networkId, fresh, responses.mapNotNull { it.nextAt }.minOrNull(), now, returnsMade)
     }
 
     /** Vrai tant que le retour prévu à [wakeAt] est attendu : écran resté éteint, il ne l'est plus. */
