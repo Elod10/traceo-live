@@ -129,6 +129,15 @@ class ProximityTest {
     }
 
     @Test
+    fun traceoFallbackDropsTerminusArrivalsEvenWithAKey() {
+        val answer = { n: NearbyLine ->
+            Result.success(PassageSnapshot(listOf(dep(2, n.stopName), dep(3, "Autre")), viaTraceo = true))
+        }
+        val kept = collect(listOf(ranked("1")), rows = 1, removeTerminus = false, answer = answer).first
+        assertEquals(listOf("Autre"), kept.entries.single().departures.map { it.destination })
+    }
+
+    @Test
     fun onlyAFewPassagesAreStoredPerLine() {
         val (state, _) = collect(listOf(ranked("1")), rows = 1) {
             Result.success(PassageSnapshot((1..20).map { minutes -> dep(minutes) }))

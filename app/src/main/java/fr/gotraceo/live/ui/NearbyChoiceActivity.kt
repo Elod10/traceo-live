@@ -16,7 +16,6 @@ import android.widget.ImageView
 import android.widget.ListView
 import android.widget.TextView
 import fr.gotraceo.live.R
-import fr.gotraceo.live.data.DataSources
 import fr.gotraceo.live.data.Directions
 import fr.gotraceo.live.data.NearbyLine
 import fr.gotraceo.live.data.PassageSnapshot
@@ -34,10 +33,11 @@ import fr.gotraceo.live.widget.WidgetUpdater
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 
 /** Feuille ouverte par le double toucher d'un widget automatique : les lignes proches, à choisir. */
@@ -84,8 +84,10 @@ class NearbyChoiceActivity : Activity() {
 
     override fun onDestroy() {
         scope.cancel()
-        // Sans choix, l'arrêt ne change pas : seuls les passages sont actualisés.
-        if (widgetId != AppWidgetManager.INVALID_APPWIDGET_ID && !chosen) WidgetUpdater.requestRefresh(this, widgetId)
+        // Sans choix, l'arrêt ne change pas : seuls les passages sont actualisés (pas sur simple rotation).
+        if (widgetId != AppWidgetManager.INVALID_APPWIDGET_ID && !chosen && !isChangingConfigurations) {
+            WidgetUpdater.requestRefresh(this, widgetId)
+        }
         super.onDestroy()
     }
 
@@ -112,13 +114,14 @@ class NearbyChoiceActivity : Activity() {
         }
     }
 
-    /** Chaque ligne demande une requête : seules les premières sont interrogées. */
+    /** Seules les premières lignes sont interrogées ; avec une clé, celles d'une même zone partagent une requête. */
     private fun loadPassages(ranked: List<RankedLine>) {
-        val source = Sources.passages(this@NearbyChoiceActivity)
+        val source = Sources.proximity(this@NearbyChoiceActivity)
         val hasKey = prefs.hasApiKey
+        val parallel = Semaphore(MAX_PARALLEL_REQUESTS)
         ranked.forEach { line ->
             scope.launch {
-                val snapshot = async(Dispatchers.IO) { AutoMode.fetch(source, line.nearby) }.await().getOrNull()
+                val snapshot = withContext(Dispatchers.IO) { parallel.withPermit { source(line.nearby) } }.getOrNull()
                 adapter.setPassage(line.nearby.line.id, snapshot?.let { nextPassage(it, line.nearby, hasKey) }, loaded = snapshot != null)
             }
         }
@@ -126,10 +129,10 @@ class NearbyChoiceActivity : Activity() {
 
     private fun nextPassage(snapshot: PassageSnapshot, nearby: NearbyLine, hasKey: Boolean): Passage? {
         val now = System.currentTimeMillis()
-        val departures = if (hasKey) {
-            snapshot.departures
-        } else {
+        val departures = if (!hasKey || snapshot.viaTraceo) {
             Directions.withoutTerminusArrivals(snapshot.departures, nearby.stopName)
+        } else {
+            snapshot.departures
         }
         val first = Directions.upcoming(departures, now).firstOrNull { !it.isCancelled } ?: return null
         return WidgetContent.passage(first, now, nearby.line.mode)
@@ -237,6 +240,7 @@ class NearbyChoiceActivity : Activity() {
     private companion object {
         const val SHEET_HEIGHT = 0.7f
         const val PASSAGES_SHOWN = 8
+        const val MAX_PARALLEL_REQUESTS = 4
         const val LOCATING_POLL_MS = 100L
         const val BADGE_DP = 32f
         const val WAIT_TEXT_SP = 30f
