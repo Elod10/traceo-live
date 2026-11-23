@@ -33,10 +33,13 @@ class WidgetActionReceiver : BroadcastReceiver() {
             }
             WidgetUpdater.ACTION_TICK -> WidgetBroadcasts.runAsync(this, context, foreground) {
                 val ids = WidgetUpdater.widgetIds(context)
-                // Les widgets qui suivent la position la relisent d'abord, puis actualisent leurs passages.
                 val followed = AutoMode.followedNow(context, ids, System.currentTimeMillis())
-                followed.forEach { AutoMode.follow(context, it) }
+                // Les autres d'abord : chaque réponse de Tracéo annonce le relevé suivant, et un widget
+                // suivi servi avant eux repousserait leur échéance à chaque tick, sans qu'ils ne
+                // demandent jamais rien.
                 WidgetUpdater.refresh(context, ids.filter { it !in followed }.toIntArray(), force = false)
+                // Les widgets qui suivent la position la relisent, puis actualisent leurs passages.
+                followed.forEach { AutoMode.follow(context, it) }
             }
             // Le filet de sécurité n'arrive que si rien n'a reprogrammé le tick depuis plusieurs minutes :
             // au réveil de l'appareil, en même temps que le tick en retard, ou parce que le tick s'est perdu.
