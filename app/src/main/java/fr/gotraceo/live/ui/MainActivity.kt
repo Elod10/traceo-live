@@ -45,6 +45,7 @@ class MainActivity : Activity() {
     private lateinit var widgetsEmpty: View
     private lateinit var widgetsTitle: View
     private lateinit var exactAlarmCard: View
+    private lateinit var backgroundDataCard: View
 
     private val handler = Handler(Looper.getMainLooper())
     private val rebuild = Runnable { refreshWidgetList() }
@@ -81,6 +82,8 @@ class MainActivity : Activity() {
         findViewById<View>(R.id.open_support).setOnClickListener { Support.open(this) }
         exactAlarmCard = findViewById(R.id.exact_alarm_card)
         findViewById<View>(R.id.exact_alarm_allow).setOnClickListener { ExactAlarmAccess.openSettings(this) }
+        backgroundDataCard = findViewById(R.id.background_data_card)
+        findViewById<View>(R.id.background_data_allow).setOnClickListener { BackgroundDataAccess.openSettings(this) }
         SystemBars.pad(this)
     }
 
@@ -107,6 +110,8 @@ class MainActivity : Activity() {
         widgetsTitle.visibility = if (ids.isEmpty()) View.GONE else View.VISIBLE
         val needsExactAlarms = ids.isNotEmpty() && WidgetUpdater.needsExactAlarmAccess(this)
         exactAlarmCard.visibility = if (needsExactAlarms) View.VISIBLE else View.GONE
+        val needsBackgroundData = ids.isNotEmpty() && WidgetUpdater.needsBackgroundDataAccess(this)
+        backgroundDataCard.visibility = if (needsBackgroundData) View.VISIBLE else View.GONE
         val now = System.currentTimeMillis()
         ids.forEach { widgetsContainer.addView(widgetView(it, now)) }
     }

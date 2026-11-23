@@ -5,6 +5,7 @@ import android.app.PendingIntent
 import android.appwidget.AppWidgetManager
 import android.content.Context
 import android.content.Intent
+import android.net.ConnectivityManager
 import android.os.Build
 import android.os.PowerManager
 import android.util.Log
@@ -354,6 +355,24 @@ object WidgetUpdater {
         val alarmManager = context.getSystemService(AlarmManager::class.java) ?: return false
         return !canUseExactAlarms(alarmManager)
     }
+
+    /**
+     * Vrai si Android empêche l'appli d'utiliser le réseau en arrière-plan : les widgets ne peuvent
+     * alors pas s'actualiser seuls (la requête du tick échoue dès la résolution DNS). Couvre
+     * l'économiseur de données comme le réglage « Données en arrière-plan » de l'appli désactivé.
+     */
+    fun needsBackgroundDataAccess(context: Context): Boolean {
+        val connectivity = context.getSystemService(ConnectivityManager::class.java) ?: return false
+        return blocksBackgroundData(connectivity.restrictBackgroundStatus)
+    }
+
+    /**
+     * Lecture de [ConnectivityManager.getRestrictBackgroundStatus]. ENABLED vaut pour les deux causes :
+     * réglage de l'appli coupé, ou économiseur de données actif sans exception pour l'appli.
+     * WHITELISTED (économiseur actif, appli exemptée) laisse passer les requêtes.
+     */
+    internal fun blocksBackgroundData(status: Int): Boolean =
+        status == ConnectivityManager.RESTRICT_BACKGROUND_STATUS_ENABLED
 
     /** Demande une actualisation immédiate (depuis l'application). */
     fun requestRefresh(context: Context, widgetId: Int? = null) {

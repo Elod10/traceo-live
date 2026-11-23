@@ -176,6 +176,9 @@
     <string name="exact_alarm_allow">Autoriser</string>
     <string name="exact_alarm_widget_body">Votre widget est enregistré. Pour qu\'il recompte les minutes à l\'heure, autorisez Tracéo Live dans « Alarmes et rappels » : sans cela, ses temps d\'attente peuvent avoir plusieurs minutes de retard.</string>
     <string name="exact_alarm_later">Plus tard</string>
+    <string name="background_data_title">Widgets bloqués en arrière-plan</string>
+    <string name="background_data_body">Android empêche Tracéo Live d\'utiliser les données mobiles en arrière-plan (économiseur de données, ou « Données en arrière-plan » désactivé). Sans Wi-Fi, vos widgets ne s\'actualisent alors que quand vous ouvrez l\'appli.</string>
+    <string name="background_data_allow">Autoriser</string>
     <string name="direction_none_found">Aucun sens détecté pour l\'instant (fin de service…) : réessayez plus tard</string>
     <string name="keep_current">Garder la ligne et l\'arrêt actuels</string>
     <string name="keep_current_sub">%1$s · %2$s : modifier seulement le sens</string>
