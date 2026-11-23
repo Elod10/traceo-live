@@ -162,6 +162,17 @@ class QuotaAndScheduleTest {
         assertEquals(byInterval, RefreshSchedule.dueAt(T0, 2, true, 0L, 5_000L))
     }
 
+    @Test
+    fun anAnswerToAnotherWidgetPushesBackTheDeadlineOfThoseNotYetServed() {
+        // D'où l'ordre du tick : les widgets ordinaires avant ceux qui suivent la position. La réponse
+        // faite à un seul annonce le relevé suivant, et les autres, vus après lui, n'auraient plus
+        // rien à demander, tick après tick.
+        val snapshot = T0 + 2 * MINUTE
+        val now = snapshot + 12_000L
+        assertTrue(RefreshSchedule.dueAt(T0, 2, true, snapshot, 12_000L)!! <= now)
+        assertTrue(RefreshSchedule.dueAt(T0, 2, true, snapshot + 2 * MINUTE, 12_000L)!! > now)
+    }
+
     // --- Tick et broadcasts ---------------------------------------------------------------------
 
     @Test
