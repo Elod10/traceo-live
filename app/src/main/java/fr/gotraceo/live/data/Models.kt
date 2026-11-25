@@ -51,6 +51,8 @@ data class Line(
     val textColor: String? = null,
     /** Réseau de la ligne (cf. [Networks]) : [id] n'est unique que dans ce réseau. */
     val networkId: String = Networks.IDFM,
+    /** Faux quand Tracéo sait que la ligne n'apparaît jamais dans le flux temps réel de son réseau. */
+    val realtime: Boolean = true,
 ) {
     val lineRef: String get() = "STIF:Line::$id:"
 
@@ -87,6 +89,7 @@ data class Line(
         .putOpt("color", color)
         .putOpt("textColor", textColor)
         .putOpt("networkId", storedNetworkId(networkId))
+        .putOpt("realtime", if (realtime) null else false)
 
     companion object {
         fun fromJson(o: JSONObject): Line = Line(
@@ -100,6 +103,7 @@ data class Line(
             color = o.optStringOrNull("color"),
             textColor = o.optStringOrNull("textColor"),
             networkId = o.networkIdOrIdfm(),
+            realtime = o.optBoolean("realtime", true),
         )
     }
 }

@@ -1,7 +1,8 @@
 package fr.gotraceo.live.data
 
-// Choix de l'accès aux données : sans clé, le cache de Tracéo, qui interroge lui-même PRIM ; avec une
-// clé, PRIM et l'open data IDFM en direct.
+// Choix de l'accès aux données. En Île-de-France : sans clé, le cache de Tracéo, qui interroge lui-même
+// PRIM ; avec une clé, PRIM et l'open data IDFM en direct. Pour un autre réseau, toujours le cache de
+// Tracéo : la clé PRIM, son quota et son repli ne le concernent pas.
 // Ce fichier n'utilise aucune API Android afin d'être testable sur JVM.
 
 /** Passages renvoyés par une source, avec la date du relevé quand elle ne répond pas en direct. */
@@ -37,14 +38,44 @@ object DataSources {
     const val TRACEO_MIN_REFRESH_MINUTES = 2
     private const val TRACEO_CACHE_PREFIX = "traceo_"
 
+    /** Route d'un arrêt d'Île-de-France. */
     fun route(stopIds: Collection<String>, hasKey: Boolean): PassageRoute = when {
         hasKey -> PassageRoute.PRIM
         stopIds.isNotEmpty() && stopIds.all { TraceoClient.isTraceoStop(it) } -> PassageRoute.TRACEO
         else -> PassageRoute.RECONFIGURE
     }
 
+    /** Route d'un arrêt de son réseau : hors Île-de-France, Tracéo, avec ou sans clé PRIM. */
+    fun route(networkId: String, stopIds: Collection<String>, hasKey: Boolean): PassageRoute = when {
+        Networks.isIdfm(networkId) -> route(stopIds, hasKey)
+        stopIds.isNotEmpty() -> PassageRoute.TRACEO
+        else -> PassageRoute.RECONFIGURE
+    }
+
+    fun route(config: WidgetConfig, hasKey: Boolean): PassageRoute = route(config.networkId, config.stop.stopIds, hasKey)
+
     /**
-     * Source des passages d'un widget.
+     * Source des passages d'un réseau. La clé, son quota et son repli ne valent que pour
+     * l'Île-de-France ; ailleurs, la source est toujours le cache de Tracéo pour ce réseau.
+     *
+     * @param traceo le cache de Tracéo pour un réseau donné
+     */
+    fun networkSource(
+        networkId: String,
+        apiKey: String,
+        formats: PrimClient.FormatCache = PrimClient.FormatCache.InMemory(),
+        usage: PrimClient.UsageListener = PrimClient.UsageListener.NONE,
+        primPaused: Boolean = false,
+        traceo: (String) -> PassageSource = TraceoClient()::forNetwork,
+    ): PassageSource =
+        if (Networks.isIdfm(networkId)) {
+            passageSource(apiKey, formats, usage, primPaused, traceo(Networks.IDFM))
+        } else {
+            traceo(networkId)
+        }
+
+    /**
+     * Source des passages d'un widget d'Île-de-France.
      *
      * Avec une clé dont le quota du jour est épuisé ([primPaused]), ou dès que PRIM le refuse, les
      * arrêts connus de Tracéo passent par son cache ; les autres, créés avec la clé, attendent le
@@ -78,27 +109,43 @@ object DataSources {
         return traceo.passages(stopId, lineId)
     }
 
-    /** Source du format À proximité : une requête par ligne sans clé, une par zone avec une clé. */
+    /**
+     * Source du format À proximité : une requête par ligne sans clé, une par zone avec une clé. Hors
+     * Île-de-France, toujours une requête par ligne, au cache de Tracéo pour le réseau de la ligne.
+     *
+     * @param traceo le cache de Tracéo pour un réseau donné
+     */
     fun proximitySource(
         apiKey: String,
         formats: PrimClient.FormatCache = PrimClient.FormatCache.InMemory(),
         usage: PrimClient.UsageListener = PrimClient.UsageListener.NONE,
         primPaused: Boolean = false,
-        traceo: PassageSource = TraceoClient(),
+        traceo: (String) -> PassageSource = TraceoClient()::forNetwork,
     ): (NearbyLine) -> Result<PassageSnapshot> {
         val byLine: (NearbyLine) -> Result<PassageSnapshot> = { nearby ->
-            runCatching { traceo.passages(nearby.stopId, nearby.line.id) }
+            runCatching { traceo(nearby.line.networkId).passages(nearby.stopId, nearby.line.id) }
         }
         // Les arrêts de l'index local sont des zones connues de Tracéo : le repli marche pour toutes.
         if (apiKey.isBlank() || primPaused) return byLine
         val prim = PrimClient(apiKey, formats = formats, usage = usage)
         val zones = PrimZonePassages { stopId -> prim.departures(stopId, null) }
         return { nearby ->
-            val result = zones.passages(nearby)
-            val quota = (result.exceptionOrNull() as? PrimException)?.kind == PrimException.Kind.QUOTA
-            if (quota) byLine(nearby) else result
+            if (!Networks.isIdfm(nearby.line.networkId)) {
+                byLine(nearby)
+            } else {
+                val result = zones.passages(nearby)
+                val quota = (result.exceptionOrNull() as? PrimException)?.kind == PrimException.Kind.QUOTA
+                if (quota) byLine(nearby) else result
+            }
         }
     }
+
+    /**
+     * Vrai s'il faut retirer les arrivées au terminus des passages reçus. Seul le cache francilien
+     * de Tracéo les inclut ; pour les autres réseaux, le serveur les a déjà retirées, et le nom
+     * d'un arrêt n'y prouve rien.
+     */
+    fun dropsTerminusArrivals(networkId: String, viaTraceo: Boolean): Boolean = viaTraceo && Networks.isIdfm(networkId)
 
     /** Vrai si l'échec vient du réseau : inutile alors d'interroger d'autres lignes. */
     fun isNetworkFailure(error: Throwable?): Boolean = when (error) {
@@ -111,6 +158,12 @@ object DataSources {
     /** Intervalle d'actualisation réellement appliqué pour le réglage choisi par l'utilisateur. */
     fun refreshMinutes(chosen: Int, hasKey: Boolean): Int =
         if (!hasKey && chosen == 1) TRACEO_MIN_REFRESH_MINUTES else chosen
+
+    /**
+     * Intervalle appliqué à un réseau relevé toutes les [sourceMinutes] : actualiser plus souvent ne
+     * rapporterait que le relevé déjà affiché.
+     */
+    fun refreshMinutes(chosen: Int, sourceMinutes: Int): Int = if (chosen in 1 until sourceMinutes) sourceMinutes else chosen
 
     /** Intervalles à proposer : seulement ceux qui s'appliquent tels quels avec cette source. */
     fun refreshChoices(all: List<Int>, hasKey: Boolean): List<Int> =
@@ -126,9 +179,31 @@ object DataSources {
 
     /** Les identifiants d'arrêt diffèrent selon la source : leurs fichiers ne doivent pas se mélanger. */
     fun stopsCacheName(lineId: String, hasKey: Boolean): String {
-        val name = "stops_" + lineId.replace(Regex("[^A-Za-z0-9_-]"), "_") + ".json"
+        val name = "stops_" + lineId.replace(UNSAFE_IN_FILE_NAME, "_") + ".json"
         return if (hasKey) name else TRACEO_CACHE_PREFIX + name
     }
+
+    /** Fichier des lignes d'un réseau hors Île-de-France : chaque réseau a les siens. */
+    fun networkLinesCacheName(networkId: String): String = NETWORK_CACHE_PREFIX + networkId + "_lines.json"
+
+    /**
+     * Fichier des arrêts d'une ligne d'un réseau hors Île-de-France. L'identifiant d'une ligne y est
+     * opaque (« ZI TAD », « 1:A ») : l'empreinte distingue deux identifiants que le nettoyage confondrait.
+     */
+    fun networkStopsCacheName(networkId: String, lineId: String): String =
+        NETWORK_CACHE_PREFIX + networkId + "_stops_" + lineId.replace(UNSAFE_IN_FILE_NAME, "_") + "_" +
+            Integer.toHexString(lineId.hashCode()) + ".json"
+
+    /**
+     * Préférence où est retenu le `nextAt` d'un réseau. L'Île-de-France garde celle d'avant les
+     * réseaux : la dernière annonce reçue reste valable après la mise à jour.
+     */
+    fun nextAtPreference(networkId: String): String =
+        if (Networks.isIdfm(networkId)) IDFM_NEXT_AT_PREFERENCE else IDFM_NEXT_AT_PREFERENCE + "_" + networkId
+
+    private const val IDFM_NEXT_AT_PREFERENCE = "traceo_next_at"
+    private const val NETWORK_CACHE_PREFIX = "reseau_"
+    private val UNSAFE_IN_FILE_NAME = Regex("[^A-Za-z0-9_-]")
 }
 
 /** Calcule l'état d'un widget à partir des réponses de sa source. */
@@ -138,7 +213,8 @@ object WidgetStates {
 
     /**
      * @param results une réponse par point d'arrêt interrogé
-     * @param removeTerminusArrivals vrai pour Tracéo, qui inclut les arrivées au terminus
+     * @param removeTerminusArrivals vrai pour Tracéo, qui inclut les arrivées au terminus ; sans effet
+     *        hors Île-de-France (cf. [DataSources.dropsTerminusArrivals])
      */
     fun from(
         config: WidgetConfig,
@@ -166,7 +242,11 @@ object WidgetStates {
         val received = snapshots.flatMap { it.departures }
         // Tracéo inclut les arrivées au terminus, y compris en repli d'une clé dont le quota est épuisé.
         val viaTraceo = removeTerminusArrivals || snapshots.any { it.viaTraceo }
-        val shown = if (viaTraceo) Directions.withoutTerminusArrivals(received, config.stop.name) else received
+        val shown = if (DataSources.dropsTerminusArrivals(config.networkId, viaTraceo)) {
+            Directions.withoutTerminusArrivals(received, config.stop.name)
+        } else {
+            received
+        }
         val filtered = Directions.upcoming(Directions.filter(shown, config.directions), now)
         return WidgetState(
             fetchedAt = now,

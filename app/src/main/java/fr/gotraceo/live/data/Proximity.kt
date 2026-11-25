@@ -105,7 +105,8 @@ object Proximity {
      * le plus souvent d'une requête par rangée, et une ligne sans passage laisse sa place à la suivante.
      *
      * @param rows rangées à remplir
-     * @param removeTerminusArrivals vrai pour Tracéo, qui inclut les arrivées au terminus
+     * @param removeTerminusArrivals vrai pour Tracéo, qui inclut les arrivées au terminus ; sans effet
+     *        hors Île-de-France
      * @param fetch passages d'un lot de lignes, dans le même ordre
      */
     suspend fun collect(
@@ -162,7 +163,7 @@ object Proximity {
 
     private fun entry(row: RankedLine, snapshot: PassageSnapshot?, now: Long, removeTerminusArrivals: Boolean): ProximityEntry {
         val received = snapshot?.departures.orEmpty()
-        val shown = if (removeTerminusArrivals) {
+        val shown = if (DataSources.dropsTerminusArrivals(row.nearby.line.networkId, removeTerminusArrivals)) {
             Directions.withoutTerminusArrivals(received, row.nearby.stopName)
         } else {
             received

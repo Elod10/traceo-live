@@ -39,6 +39,7 @@ import fr.gotraceo.live.data.DataSources
 import fr.gotraceo.live.data.DirectionOption
 import fr.gotraceo.live.data.Directions
 import fr.gotraceo.live.data.Line
+import fr.gotraceo.live.data.Networks
 import fr.gotraceo.live.data.PassageRoute
 import fr.gotraceo.live.data.PassageSnapshot
 import fr.gotraceo.live.data.PositionFix
@@ -525,7 +526,7 @@ class ConfigureActivity : Activity() {
             payload = AutoRow,
         )
         // Un arrêt choisi avec une clé retirée depuis n'existe pas chez Tracéo : impossible de le garder.
-        existing?.takeIf { !it.auto && DataSources.route(it.stop.stopIds, hasKey) != PassageRoute.RECONFIGURE }?.let { cfg ->
+        existing?.takeIf { !it.auto && DataSources.route(it, hasKey) != PassageRoute.RECONFIGURE }?.let { cfg ->
             items += RowItem(
                 title = getString(R.string.keep_current),
                 subtitle = getString(R.string.keep_current_sub, UiText.lineTitle(cfg.line), cfg.stop.name),
@@ -745,7 +746,7 @@ class ConfigureActivity : Activity() {
         renderPreview()
         updateSaveEnabled()
         loadJob = scope.launch {
-            val source = Sources.passages(this@ConfigureActivity)
+            val source = Sources.passages(this@ConfigureActivity, row.nearby.line.networkId)
             val result = withContext(Dispatchers.IO) { AutoMode.fetch(source, row.nearby) }
             val config = AutoMode.configFor(widgetId, row.nearby, selectedTheme)
             previewState = WidgetStates.from(
@@ -816,7 +817,7 @@ class ConfigureActivity : Activity() {
         showLoading(getString(R.string.loading_stops))
         loadJob = scope.launch {
             try {
-                val stops = repository.stops(l.id, forceRefresh)
+                val stops = repository.stops(l, forceRefresh)
                 if (stops.isEmpty()) {
                     showMessage(getString(R.string.no_stop), canRetry = true)
                 } else {
@@ -840,7 +841,7 @@ class ConfigureActivity : Activity() {
         save.isEnabled = false
         showLoading(getString(R.string.loading_directions))
         loadJob = scope.launch {
-            val source = Sources.passages(this@ConfigureActivity)
+            val source = Sources.passages(this@ConfigureActivity, l.networkId)
             val results = withContext(Dispatchers.IO) {
                 s.stopIds.map { id -> async { id to runCatching { source.passages(id, l.id) } } }.awaitAll()
             }
@@ -848,10 +849,14 @@ class ConfigureActivity : Activity() {
             directionOptions = Directions.buildOptions(
                 s,
                 results.associate { (id, result) ->
-                    // Tracéo inclut les arrivées au terminus : elles ne sont pas un sens à proposer.
+                    // En Île-de-France, Tracéo inclut les arrivées au terminus : elles ne sont pas un sens à proposer.
                     id to result.getOrNull()?.let { snapshot ->
                         val departures = snapshot.departures
-                        if (snapshot.viaTraceo) Directions.withoutTerminusArrivals(departures, s.name) else departures
+                        if (DataSources.dropsTerminusArrivals(l.networkId, snapshot.viaTraceo)) {
+                            Directions.withoutTerminusArrivals(departures, s.name)
+                        } else {
+                            departures
+                        }
                     }
                 },
             )

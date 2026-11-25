@@ -52,10 +52,15 @@ class Prefs(context: Context) {
     /** Vrai si les passages viennent de PRIM en direct : une clé, et du quota pour aujourd'hui. */
     val usesPrim: Boolean get() = hasApiKey && !primPaused
 
-    /** Dernière date annoncée par Tracéo pour son prochain relevé (`nextAt`), 0 si inconnue. */
-    var traceoNextAt: Long
-        get() = settings.getLong(KEY_TRACEO_NEXT_AT, 0L)
-        set(value) = settings.edit().putLong(KEY_TRACEO_NEXT_AT, value).apply()
+    /**
+     * Dernière date annoncée par Tracéo pour le prochain relevé d'un réseau (`nextAt`), 0 si inconnue.
+     * Chaque réseau est relevé à sa cadence : l'annonce de l'un ne vaut pas pour un autre.
+     */
+    fun traceoNextAt(networkId: String = Networks.IDFM): Long =
+        settings.getLong(DataSources.nextAtPreference(networkId), 0L)
+
+    fun setTraceoNextAt(networkId: String, value: Long) =
+        settings.edit().putLong(DataSources.nextAtPreference(networkId), value).apply()
 
     /**
      * Décalage propre à cette installation, tiré une fois pour toutes : les téléphones n'interrogent
@@ -256,7 +261,6 @@ class Prefs(context: Context) {
         private const val KEY_TILE_WIDGET = "tile_widget"
         private const val KEY_TILE_ADDED = "tile_added"
         private const val KEY_PRIM_USAGE = "prim_usage"
-        private const val KEY_TRACEO_NEXT_AT = "traceo_next_at"
         private const val KEY_REFRESH_OFFSET = "refresh_offset_ms"
         private val usageLock = Any()
         const val DEFAULT_REFRESH_MINUTES = 2

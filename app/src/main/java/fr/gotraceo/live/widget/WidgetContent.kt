@@ -552,7 +552,7 @@ object WidgetModels {
         val passages = upcoming.map { WidgetContent.passage(it, now, line?.mode.orEmpty()) }
         val notice = when {
             config == null -> Notice(NoticeKind.NOT_CONFIGURED)
-            DataSources.route(config.stop.stopIds, hasApiKey) == PassageRoute.RECONFIGURE -> Notice(NoticeKind.RECONFIGURE)
+            DataSources.route(config, hasApiKey) == PassageRoute.RECONFIGURE -> Notice(NoticeKind.RECONFIGURE)
             passages.isNotEmpty() -> null
             state == null -> Notice(NoticeKind.LOADING)
             state.error != null -> Notice(NoticeKind.ERROR, state.error)
