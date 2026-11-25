@@ -28,10 +28,18 @@ object WidgetTexts {
         // l'orientation de l'écran au moment où la notification est écrite ne dit rien de l'écran d'accueil.
         val (width, height) = WidgetRenderer.widgetSizes(manager.getAppWidgetOptions(widgetId)).portrait
         return if (format == WidgetFormat.PROXIMITE) {
-            val model = WidgetModels.buildProximity(config, prefs.proximity(widgetId), false, width, height, now, night = true)
+            val state = prefs.proximity(widgetId)
+            val networkId = state?.entries?.firstOrNull()?.nearby?.line?.networkId ?: config.networkId
+            val model = WidgetModels.buildProximity(
+                config, state, false, width, height, now, night = true,
+                networkName = Sources.networkName(context, networkId),
+            )
             WidgetText(config, model, null)
         } else {
-            val model = WidgetModels.build(config, prefs.state(widgetId), prefs.hasApiKey, false, width, height, now, format)
+            val model = WidgetModels.build(
+                config, prefs.state(widgetId), prefs.hasApiKey, false, width, height, now, format,
+                networkName = Sources.networkName(context, config.networkId),
+            )
             WidgetText(config, model, UiText.lineTitle(config.line))
         }
     }

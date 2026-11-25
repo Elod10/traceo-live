@@ -5,6 +5,7 @@ import fr.gotraceo.live.data.DataSources
 import fr.gotraceo.live.data.Departure
 import fr.gotraceo.live.data.Directions
 import fr.gotraceo.live.data.Line
+import fr.gotraceo.live.data.NetworkMentions
 import fr.gotraceo.live.data.Networks
 import fr.gotraceo.live.data.PassageRoute
 import fr.gotraceo.live.data.PrimClient
@@ -541,6 +542,7 @@ object WidgetModels {
         autoHint: AutoHint? = null,
         autoDistanceM: Int? = null,
         night: Boolean = true,
+        networkName: String? = null,
     ): WidgetModel {
         val line = config?.line
         val rail = line?.mode == "rail"
@@ -587,7 +589,7 @@ object WidgetModels {
             refreshing = refreshing,
             notice = notice,
             sourceLabel = if (snapshot != null && !quiet) TraceoClient.SOURCE_NAME else null,
-            sourceDetail = if (snapshot != null && !quiet) TraceoClient.SOURCE_DETAIL else null,
+            sourceDetail = if (snapshot != null && !quiet) snapshotSource(config?.networkId, networkName) else null,
             liveSource = if (snapshot == null && !quiet && shownAt > 0L) PrimClient.SOURCE_NAME else null,
             oldSnapshot = snapshot?.fresh == false && !quiet,
             autoHint = hint?.label,
@@ -596,10 +598,18 @@ object WidgetModels {
     }
 
     /**
+     * Source à citer en toutes lettres à côté de l'heure d'un relevé : les données franciliennes sont
+     * celles de PRIM, celles d'un autre réseau portent son nom.
+     */
+    private fun snapshotSource(networkId: String?, networkName: String?): String =
+        if (networkId == null || Networks.isIdfm(networkId)) TraceoClient.SOURCE_DETAIL else NetworkMentions.sourceDetail(networkName)
+
+    /**
      * Modèle du format À proximité. Sa couleur suit le thème du système, et son contenu vient de
      * plusieurs lignes : il a donc son propre état.
      *
      * @param night vrai si le système est en thème sombre
+     * @param networkName nom du réseau des lignes affichées, hors Île-de-France
      */
     fun buildProximity(
         config: WidgetConfig?,
@@ -610,6 +620,7 @@ object WidgetModels {
         now: Long,
         night: Boolean,
         autoHint: AutoHint? = null,
+        networkName: String? = null,
     ): WidgetModel {
         val format = WidgetFormat.PROXIMITE
         val palette = Palettes.resolve(if (night) WidgetTheme.DARK else WidgetTheme.LIGHT, format, null)
@@ -646,7 +657,12 @@ object WidgetModels {
             refreshing = refreshing,
             notice = notice,
             sourceLabel = if (snapshot != null && !quiet) TraceoClient.SOURCE_NAME else null,
-            sourceDetail = if (snapshot != null && !quiet) TraceoClient.SOURCE_DETAIL else null,
+            sourceDetail = if (snapshot != null && !quiet) {
+                // Le réseau du format est celui de ses lignes, toutes relevées au même endroit.
+                snapshotSource(state?.entries?.firstOrNull()?.nearby?.line?.networkId ?: config?.networkId, networkName)
+            } else {
+                null
+            },
             liveSource = if (snapshot == null && !quiet && shownAt > 0L) PrimClient.SOURCE_NAME else null,
             oldSnapshot = snapshot?.fresh == false && !quiet,
             autoHint = hint?.label,

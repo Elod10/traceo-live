@@ -4,6 +4,7 @@ import android.content.Context
 import fr.gotraceo.live.data.DataSources
 import fr.gotraceo.live.data.NearbyLine
 import fr.gotraceo.live.data.NetworkCatalogStore
+import fr.gotraceo.live.data.Networks
 import fr.gotraceo.live.data.PassageSnapshot
 import fr.gotraceo.live.data.PassageSource
 import fr.gotraceo.live.data.Prefs
@@ -21,6 +22,20 @@ object Sources {
     /** Le catalogue des réseaux gardé sur le téléphone. */
     fun catalog(context: Context): NetworkCatalogStore =
         NetworkCatalogStore(File(context.applicationContext.noBackupFilesDir, CATALOG_FILE))
+
+    /**
+     * Réseaux dont l'application montre des données : ceux des widgets configurés, l'Île-de-France
+     * en tête. C'est d'eux que les écrans citent la source et la licence.
+     */
+    fun usedNetworks(context: Context): List<String> {
+        val prefs = Prefs(context)
+        val ids = WidgetUpdater.widgetIds(context).asList().mapNotNull { prefs.config(it)?.networkId }.distinct()
+        return ids.sortedBy { if (Networks.isIdfm(it)) 0 else 1 }
+    }
+
+    /** Nom d'un réseau hors Île-de-France d'après le catalogue du téléphone, pour le citer comme source. */
+    fun networkName(context: Context, networkId: String?): String? =
+        networkId?.takeUnless(Networks::isIdfm)?.let { catalog(context).read().byId(it)?.name }
 
     fun passages(context: Context, networkId: String): PassageSource {
         val prefs = Prefs(context)

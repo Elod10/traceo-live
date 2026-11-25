@@ -107,6 +107,8 @@ class NearbyChoiceActivity : Activity() {
                 return@launch
             }
             status.visibility = View.GONE
+            // Les lignes proposées sont toutes du réseau où l'on se trouve : la mention est la sienne.
+            Mentions.bind(findViewById(R.id.data_mention), listOf(ranked.first().nearby.line.networkId))
             adapter.setRows(ranked.map { Row(it) })
             loadPassages(ranked.take(PASSAGES_SHOWN))
         }
