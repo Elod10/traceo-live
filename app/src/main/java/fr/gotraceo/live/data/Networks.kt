@@ -136,7 +136,7 @@ data class Network(
                 name = name,
                 city = o.optStringOrNull("city") ?: name,
                 bbox = bbox,
-                modes = o.optJSONArray("modes").toStringList().map(Networks::appMode),
+                modes = o.optJSONArray("modes").toStringList().map(Networks::appMode).distinct(),
                 refreshSec = o.optInt("refreshSec", DEFAULT_REFRESH_SEC).takeIf { it > 0 } ?: DEFAULT_REFRESH_SEC,
                 status = NetworkStatus.fromKey(o.optStringOrNull("status")),
                 attribution = o.optJSONObject("attribution")?.let(Attribution::fromJson),
@@ -162,11 +162,20 @@ object Networks {
     /** Vrai si l'identifiant peut entrer tel quel dans le chemin d'une route. */
     fun isValidId(networkId: String): Boolean = VALID_ID.matches(networkId)
 
+    private val KNOWN_MODES = setOf("metro", "tram", "rail", "bus", "boat", "cableway", "funicular")
+
     /**
      * Le catalogue nomme les modes `metro`, `tram`, `rail`, `bus`, `boat`, `cable` et `funicular` ;
      * l'application garde le vocabulaire du référentiel IDFM, où le câble s'appelle `cableway`.
+     *
+     * Une clé hors de cette liste, ou absente, ne doit pas rendre une ligne introuvable : elle est
+     * rangée avec les bus, comme Tracéo y range déjà le trolleybus et le car.
      */
-    fun appMode(catalogMode: String): String = if (catalogMode == "cable") "cableway" else catalogMode
+    fun appMode(catalogMode: String): String = when (catalogMode) {
+        "cable" -> "cableway"
+        in KNOWN_MODES -> catalogMode
+        else -> "bus"
+    }
 
     /**
      * L'Île-de-France ne figure pas au catalogue : l'application la connaît d'office. Son emprise est

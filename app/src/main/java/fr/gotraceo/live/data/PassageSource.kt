@@ -276,6 +276,10 @@ object WidgetStates {
             received
         }
         val filtered = Directions.upcoming(Directions.filter(shown, config.directions), now)
+        val fresh = snapshots.mapNotNull { it.fresh }.takeIf { it.isNotEmpty() }?.all { it }
+        // Le réseau se réveillait : le widget y revient à l'heure annoncée, un nombre borné de fois.
+        val returnsMade = RefreshSchedule.wakeReturnsMade(previous?.wakeAt, previous?.wakeReturns ?: 0, now)
+        val wakeAt = RefreshSchedule.wakeAt(config.networkId, fresh, snapshots.mapNotNull { it.nextAt }.minOrNull(), now, returnsMade)
         return WidgetState(
             fetchedAt = now,
             attemptedAt = now,
@@ -283,7 +287,9 @@ object WidgetStates {
             error = if (errors.isNotEmpty() && filtered.isEmpty()) errorMessage(errors.first()) else null,
             // Plusieurs relevés : on annonce le plus ancien, et « récent » seulement si tous le sont.
             dataAt = snapshots.mapNotNull { it.dataAt }.minOrNull(),
-            fresh = snapshots.mapNotNull { it.fresh }.takeIf { it.isNotEmpty() }?.all { it },
+            fresh = fresh,
+            wakeAt = wakeAt,
+            wakeReturns = if (wakeAt != null) returnsMade else 0,
         )
     }
 

@@ -182,3 +182,61 @@ Le détail est dans [prompt-traceo-reseaux-ouverts.md](prompt-traceo-reseaux-ouv
 | R3 | Un réseau qualifié sans tous ses modes est-il servi ? | Non : c'est le critère du groupe 1 |
 | R4 | Mise en production réseau par réseau ou d'un bloc | Par vagues, après essai sur téléphone en préproduction |
 | R5 | Rattachement d'un widget après un changement d'identifiants | À étudier côté appli, voir le chapitre 6 |
+
+## 10. Ce que les lots de l'appli ont décidé
+
+Chaque lot ajoute ici ce qu'il a tranché ou découvert. Rien n'a été essayé sur un téléphone : la
+préproduction de Tracéo ne sert pas encore ces réseaux, l'appli est construite contre des réponses
+enregistrées conformes au chapitre 5.
+
+### Lot 7 : contrat réel
+
+- **Les 404 d'un réseau disent ce qui manque.** L'appli lit le message du serveur : « Réseau
+  inconnu. », « Ligne inconnue. », « Arrêt inconnu sur cette ligne. ». Le widget se vide et demande
+  à être reconfiguré, avec le motif. Un message qu'elle ne reconnaît pas reste un 404 sans
+  précision, traité comme avant.
+- **« Route inconnue. » n'est pas la faute du widget.** Ce 404 vient d'un serveur qui ne sert pas,
+  ou plus, les routes des réseaux. Le widget garde ses passages et dit « Tracéo ne sert pas ce
+  réseau pour le moment », comme sur un 503. Il en va de même d'un 404 qui n'est pas du JSON :
+  Tracéo répond toujours en JSON, ce 404 vient donc d'un intermédiaire. Sur la route du catalogue,
+  « Route inconnue. » garde son sens : aucun autre réseau.
+- **Un 503 d'un réseau** (réseau coupé, routes coupées, horaires pas encore compilés) : un seul
+  message, « Ce réseau est momentanément indisponible chez Tracéo », les passages gardés, aucun
+  autre appel.
+- **Une clé de mode inconnue, ou absente, se range avec les bus**, comme Tracéo y range déjà le
+  trolleybus et le car : la ligne reste accessible. Un champ en plus est ignoré.
+- **Réveil d'un réseau.** Une réponse sans relevé récent (`fresh` faux) dont le `nextAt` tombe
+  dans les 20 secondes est prise pour celle d'un réseau qui dormait. Le widget y revient 2 à
+  6 secondes après l'heure annoncée (selon l'installation, pour ne pas revenir tous ensemble), quel
+  que soit l'intervalle choisi, même « Manuelle uniquement » : c'est la suite du même toucher. En
+  attendant, le widget, sa notification et la tuile montrent l'état de chargement au lieu de
+  « Aucun passage ». L'Île-de-France, relevée en continu, n'est pas concernée.
+- **Le réveil se décide par widget.** Chaque widget garde l'heure de son retour, d'après ses
+  propres réponses : un autre widget du même réseau, servi après le relevé, ne l'annule pas.
+- **Deux retours au plus.** Un flux en panne donne aussi des réponses sans relevé récent qui
+  annoncent le prochain tout près. Le widget ne revient donc que deux fois de suite, puis reprend
+  son intervalle ; l'actualisation ordinaire suivante repart de zéro. Passé 30 secondes après
+  l'heure annoncée (écran éteint, retour en échec), le réveil n'est plus attendu.
+- **Mode automatique et À proximité sur un réseau endormi.** La première ligne demandée réveille
+  le réseau et répond sans passage. Le mode automatique attend alors le premier relevé, 10 secondes
+  au plus, avant de choisir une ligne : sans cela, la ligne suivante, demandée après le relevé,
+  prendrait la place de la meilleure. Le format À proximité s'arrête au premier lot de lignes et y
+  revient d'un bloc. Le retour vers un réseau qui se réveille ne relit pas la position.
+- **Limites connues.** Le réveil compare le `nextAt` du serveur à l'horloge du téléphone, comme le
+  fait déjà le suivi des relevés franciliens : une horloge décalée de plus de quelques secondes le
+  fait manquer, et le widget retombe sur son intervalle. Et rien, dans la réponse, ne distingue un
+  réveil d'un flux muet (questions Q2 et Q4).
+- **Adresse de Tracéo d'un build de debug.** Elle se lit à la compilation dans `local.properties`,
+  que git ne suit pas : `traceo.debugUrl=https://…` (sans chemin). Sans cette clé, et toujours pour
+  un build de release, c'est la production. Une adresse en `http://` n'est joignable que par le
+  build de debug. Une clé mal écrite donne un avertissement, et la production.
+
+## 11. Questions à Tracéo
+
+Ce qui manque à l'appli dans le contrat, et qu'elle ne contourne qu'en attendant une réponse.
+
+| | Question | Ce que fait l'appli en attendant |
+|---|---|---|
+| Q1 | Un code stable dans le corps des 404 (par exemple `code` : `network`, `line`, `stop`, `route`), à côté du message | Elle reconnaît le message en toutes lettres ; reformulé, il redevient un 404 sans précision |
+| Q2 | Un délai relatif à côté de `nextAt` (comme `ageSec` l'est pour `fetchedAt`), pour ne pas dépendre de l'horloge du téléphone | Elle compare `nextAt` à sa propre horloge |
+| Q4 | Dans la réponse des passages, un indicateur explicite de réveil (par exemple `waking` : vrai), au lieu de le déduire de `fresh` et de `nextAt` | Elle prend pour un réveil toute réponse sans relevé récent dont le `nextAt` est à moins de 20 secondes, et borne ses retours à deux |

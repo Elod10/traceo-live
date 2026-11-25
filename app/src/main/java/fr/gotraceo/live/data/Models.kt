@@ -310,6 +310,10 @@ data class WidgetState(
     val dataAt: Long? = null,
     /** Faux si le relevé est ancien ; null si la source répond en direct. */
     val fresh: Boolean? = null,
+    /** Heure du réveil de son réseau, où le widget doit revenir ; null s'il n'en attend pas (cf. [RefreshSchedule.wakeAt]). */
+    val wakeAt: Long? = null,
+    /** Retours déjà faits à la suite pour ce réveil. */
+    val wakeReturns: Int = 0,
 ) {
     /** Vrai si les passages viennent d'un relevé de la source, et non d'une réponse en direct. */
     val isSnapshot: Boolean get() = fresh != null
@@ -321,6 +325,8 @@ data class WidgetState(
         .putOpt("error", error)
         .putOpt("dataAt", dataAt)
         .putOpt("fresh", fresh)
+        .putOpt("wakeAt", wakeAt)
+        .putOpt("wakeReturns", wakeReturns.takeIf { it > 0 })
 
     companion object {
         fun fromJson(o: JSONObject): WidgetState {
@@ -335,6 +341,8 @@ data class WidgetState(
                 // Absents des états enregistrés avant l'arrivée de Tracéo.
                 dataAt = o.optLongOrNull("dataAt"),
                 fresh = if (o.has("fresh") && !o.isNull("fresh")) o.optBoolean("fresh") else null,
+                wakeAt = o.optLongOrNull("wakeAt"),
+                wakeReturns = o.optInt("wakeReturns"),
             )
         }
     }

@@ -12,6 +12,7 @@ import fr.gotraceo.live.data.PrimClient
 import fr.gotraceo.live.data.Proximity
 import fr.gotraceo.live.data.ProximityEntry
 import fr.gotraceo.live.data.ProximityState
+import fr.gotraceo.live.data.RefreshSchedule
 import fr.gotraceo.live.data.TraceoClient
 import fr.gotraceo.live.data.WidgetConfig
 import fr.gotraceo.live.data.WidgetState
@@ -571,6 +572,8 @@ object WidgetModels {
             passages.isNotEmpty() -> null
             state == null -> Notice(NoticeKind.LOADING)
             state.error != null -> Notice(NoticeKind.ERROR, state.error)
+            // Le réseau se réveille : son premier relevé arrive, « Aucun passage » serait faux.
+            RefreshSchedule.awaitsWake(state.wakeAt, now) -> Notice(NoticeKind.LOADING)
             // Une ligne absente du flux temps réel n'aura jamais de passage : mieux vaut le dire.
             else -> Notice(NoticeKind.NO_DEPARTURE, NO_REALTIME.takeIf { line?.realtime == false })
         }
@@ -649,6 +652,7 @@ object WidgetModels {
             rows.isNotEmpty() -> null
             state == null -> Notice(NoticeKind.LOADING)
             state.error != null -> Notice(NoticeKind.ERROR, state.error)
+            RefreshSchedule.awaitsWake(state.wakeAt, now) -> Notice(NoticeKind.LOADING)
             else -> Notice(NoticeKind.NO_DEPARTURE)
         }
         val snapshot = state?.takeIf { it.isSnapshot }
