@@ -145,7 +145,12 @@ object WidgetUpdater {
         if (!isInteractive(context)) return
         val prefs = Prefs(context)
         if (ids.none { id -> prefs.config(id)?.let { !Networks.isIdfm(it.networkId) } == true }) return
-        withContext(Dispatchers.IO) { Sources.catalog(context).fresh() }
+        withContext(Dispatchers.IO) {
+            Sources.catalog(context).fresh()
+            // Le ménage des index des réseaux quittés passe ici aussi : un widget qui suit la
+            // position sans qu'on le touche ne passe jamais par le service du toucher.
+            AutoMode.pruneIndexes(context)
+        }
     }
 
     private suspend fun refreshLocked(context: Context, ids: IntArray, force: Boolean) {

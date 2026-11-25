@@ -66,7 +66,7 @@ class NearbyNetworksTest {
         missing: Set<String> = emptySet(),
         night: Boolean = false,
         idfmModes: Set<String> = setOf("metro", "rail", "tram", "bus"),
-    ) = NearbyNetworks.lookup(catalog, point, emptySet(), null, night, idfmModes, areas(point, missing))
+    ) = NearbyNetworks.lookup(catalog, point, emptySet(), null, night, idfmModes, area = areas(point, missing))
 
     // --- Le réseau de la position --------------------------------------------------------------
 

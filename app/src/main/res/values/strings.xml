@@ -246,7 +246,7 @@
     <string name="auto_loading_index_network">Téléchargement des arrêts de %1$s…</string>
     <string name="auto_error_index">Impossible de télécharger la liste des arrêts (%1$s). Vérifiez la connexion, puis réessayez.</string>
     <string name="auto_error_no_stop">Aucun arrêt à moins de 2 km.</string>
-    <string name="auto_error_no_network">Aucun réseau couvert ne dessert l\'endroit où vous êtes. Réseaux couverts : %1$s.</string>
+    <string name="auto_error_no_network">Aucun réseau couvert ne dessert l\'endroit où vous êtes. Le plus proche : %1$s, à %2$s.</string>
     <string name="auto_row_detail">%1$s · %2$s</string>
     <string name="auto_notification_channel">Position du widget</string>
     <string name="auto_notification_text">Recherche des arrêts proches…</string>

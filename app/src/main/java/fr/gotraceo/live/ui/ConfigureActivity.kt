@@ -1075,8 +1075,14 @@ class ConfigureActivity : Activity() {
                     return@launch
                 }
                 NearbyLookup.NoNetwork -> {
-                    val covered = Sources.catalog(this@ConfigureActivity).read().networks.joinToString(", ") { it.city }
-                    showMessage(getString(R.string.auto_error_no_network, covered), canRetry = true, R.drawable.ic_search_large)
+                    // Avec une vingtaine de réseaux, les citer tous ne dit rien : le plus proche suffit.
+                    val closest = Sources.catalog(this@ConfigureActivity).read().closest(fix.point)
+                    val message = if (closest == null) {
+                        getString(R.string.widget_no_network_title)
+                    } else {
+                        getString(R.string.auto_error_no_network, closest.first.city, formatDistance(closest.second))
+                    }
+                    showMessage(message, canRetry = true, R.drawable.ic_search_large)
                     return@launch
                 }
             }
@@ -1269,6 +1275,8 @@ class ConfigureActivity : Activity() {
                     // Il n'est demandé à Tracéo que dans ce cas, s'il manque ou s'il est périmé ; la
                     // liste est alors redessinée, sans avoir fait attendre.
                     val renewed = needsPlaces && withContext(Dispatchers.IO) {
+                        // Noté avant d'arriver : le ménage des index ne doit pas l'emporter pendant la configuration.
+                        prefs.markIndexUsed(l.networkId, System.currentTimeMillis())
                         try {
                             store.downloadIfOutdated(indexAt)
                         } catch (e: IOException) {
