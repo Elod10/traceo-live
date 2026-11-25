@@ -189,7 +189,7 @@ object Networks {
         id = IDFM,
         name = "Île-de-France Mobilités",
         city = "Île-de-France",
-        bbox = BoundingBox(latMin = 47.95, latMax = 49.35, lonMin = 1.3, lonMax = 3.6),
+        bbox = BoundingBox(latMin = 47.9, latMax = 49.4, lonMin = 1.25, lonMax = 3.75),
         modes = listOf("metro", "rail", "tram", "bus", "cableway", "funicular"),
         refreshSec = DataSources.TRACEO_MIN_REFRESH_MINUTES * 60,
     )
@@ -204,6 +204,14 @@ class NetworkCatalog(others: List<Network> = emptyList(), val savedAt: Long = 0L
     val others: List<Network> get() = networks.drop(1)
 
     fun byId(networkId: String): Network? = networks.firstOrNull { it.id == networkId }
+
+    /**
+     * Les réseaux dont l'emprise contient le point, du plus local au plus étendu : c'est dans cet
+     * ordre que le mode automatique y cherche des arrêts. Le calcul se fait sur le téléphone : la
+     * position ne part vers aucun serveur. Un réseau coupé reste dans la liste : ses lignes sont
+     * là, et c'est la route des passages qui dira qu'il ne répond pas.
+     */
+    fun covering(point: GeoPoint): List<Network> = networks.filter { point in it.bbox }.sortedBy { it.bbox.extent }
 
     /**
      * Le réseau à proposer à quelqu'un qui se trouve là : celui dont l'emprise contient le point, ou

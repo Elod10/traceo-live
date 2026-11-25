@@ -240,7 +240,16 @@ enum class BadgeShape { CIRCLE, SQUARE, BUS, TRAM }
 
 data class LineBadge(val label: String, val shape: BadgeShape)
 
-enum class NoticeKind { NOT_CONFIGURED, RECONFIGURE, LOADING, NO_DEPARTURE, ERROR }
+enum class NoticeKind {
+    NOT_CONFIGURED,
+    RECONFIGURE,
+    LOADING,
+    NO_DEPARTURE,
+    ERROR,
+
+    /** Widget qui suit la position, emmené là où aucun réseau n'a d'arrêt à portée. */
+    NO_NETWORK,
+}
 
 /** Un sens d'une ligne du format À proximité. */
 data class ProximityDirection(val label: String, val first: Passage, val next: Passage?)
@@ -543,6 +552,7 @@ object WidgetModels {
         autoDistanceM: Int? = null,
         night: Boolean = true,
         networkName: String? = null,
+        uncovered: Boolean = false,
     ): WidgetModel {
         val line = config?.line
         val rail = line?.mode == "rail"
@@ -555,6 +565,8 @@ object WidgetModels {
         val passages = upcoming.map { WidgetContent.passage(it, now, line?.mode.orEmpty()) }
         val notice = when {
             config == null -> Notice(NoticeKind.NOT_CONFIGURED)
+            // Les passages gardés sont ceux d'une autre ville : le dire vaut mieux que les montrer.
+            uncovered -> Notice(NoticeKind.NO_NETWORK)
             DataSources.route(config, hasApiKey) == PassageRoute.RECONFIGURE -> Notice(NoticeKind.RECONFIGURE)
             passages.isNotEmpty() -> null
             state == null -> Notice(NoticeKind.LOADING)
@@ -610,6 +622,7 @@ object WidgetModels {
      *
      * @param night vrai si le système est en thème sombre
      * @param networkName nom du réseau des lignes affichées, hors Île-de-France
+     * @param uncovered vrai si la dernière position fiable est hors de tout réseau
      */
     fun buildProximity(
         config: WidgetConfig?,
@@ -621,6 +634,7 @@ object WidgetModels {
         night: Boolean,
         autoHint: AutoHint? = null,
         networkName: String? = null,
+        uncovered: Boolean = false,
     ): WidgetModel {
         val format = WidgetFormat.PROXIMITE
         val palette = Palettes.resolve(if (night) WidgetTheme.DARK else WidgetTheme.LIGHT, format, null)
@@ -631,6 +645,7 @@ object WidgetModels {
         }
         val notice = when {
             config == null -> Notice(NoticeKind.NOT_CONFIGURED)
+            uncovered -> Notice(NoticeKind.NO_NETWORK)
             rows.isNotEmpty() -> null
             state == null -> Notice(NoticeKind.LOADING)
             state.error != null -> Notice(NoticeKind.ERROR, state.error)

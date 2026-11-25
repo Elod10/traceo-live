@@ -164,6 +164,8 @@ class MainActivity : Activity() {
         subtitle.text = when {
             config == null -> getString(R.string.widget_short_not_configured)
             reconfigure -> getString(R.string.widget_short_reconfigure)
+            // Un widget qui suit la position, emmené hors de tout réseau.
+            config.auto && prefs.auto(id).uncovered -> getString(R.string.widget_no_network_title)
             else -> statusLine(summary)
         }
         if (config != null && !reconfigure && summary?.error != null) {

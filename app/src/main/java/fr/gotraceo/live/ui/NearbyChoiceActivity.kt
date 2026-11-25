@@ -19,6 +19,7 @@ import fr.gotraceo.live.R
 import fr.gotraceo.live.data.DataSources
 import fr.gotraceo.live.data.Directions
 import fr.gotraceo.live.data.NearbyLine
+import fr.gotraceo.live.data.NearbyLookup
 import fr.gotraceo.live.data.PassageSnapshot
 import fr.gotraceo.live.data.Prefs
 import fr.gotraceo.live.data.RankedLine
@@ -101,9 +102,11 @@ class NearbyChoiceActivity : Activity() {
                 showStatus(getString(R.string.nearby_empty))
                 return@launch
             }
-            val ranked = withContext(Dispatchers.IO) { AutoMode.ranking(this@NearbyChoiceActivity, point) }?.list.orEmpty()
+            val lookup = withContext(Dispatchers.IO) { AutoMode.lookup(this@NearbyChoiceActivity, point) }
+            val ranked = lookup.rankingOrNull?.list.orEmpty()
             if (ranked.isEmpty()) {
-                showStatus(getString(R.string.nearby_empty))
+                val uncovered = lookup is NearbyLookup.NoNetwork
+                showStatus(getString(if (uncovered) R.string.nearby_no_network else R.string.nearby_empty))
                 return@launch
             }
             status.visibility = View.GONE
