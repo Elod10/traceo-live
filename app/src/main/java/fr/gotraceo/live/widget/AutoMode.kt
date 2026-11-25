@@ -39,6 +39,8 @@ import fr.gotraceo.live.data.WidgetTheme
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.IOException
@@ -58,6 +60,7 @@ import java.util.concurrent.ConcurrentHashMap
 object AutoMode {
 
     private const val TAG = "TRWidget"
+    private const val MAX_PARALLEL_REQUESTS = 4
 
     private const val PRUNE_EVERY_MS = 24L * 60 * 60 * 1000
 
@@ -317,7 +320,11 @@ object AutoMode {
         // Avant l'actualisation : hors réseau, elle ne demande rien et le widget le dit.
         if (uncovered != before.uncovered) prefs.saveAuto(widgetId, prefs.auto(widgetId).copy(uncovered = uncovered))
         if (uncovered) noteAttempt(prefs, widgetId, proximity)
-        if (!applied) WidgetUpdater.refresh(app, intArrayOf(widgetId), force = true)
+        if (!applied) {
+            WidgetUpdater.refresh(app, intArrayOf(widgetId), force = true)
+        } else {
+            WidgetUpdater.scheduleTick(app)
+        }
         if (tookOver(widgetId, tappedAt)) return
 
         val lines = ranking?.list.orEmpty()
@@ -365,6 +372,7 @@ object AutoMode {
             prefs.saveConfig(configFor(widgetId, first, config.theme))
         }
         val source = Sources.proximity(app)
+        val parallel = Semaphore(MAX_PARALLEL_REQUESTS)
         val state = Proximity.collect(
             ranked = ranked,
             rows = proximityRows(app, widgetId),
@@ -372,7 +380,7 @@ object AutoMode {
             previous = prefs.proximity(widgetId),
             removeTerminusArrivals = !prefs.usesPrim,
         ) { batch ->
-            withContext(Dispatchers.IO) { batch.map { async { source(it) } }.awaitAll() }
+            withContext(Dispatchers.IO) { batch.map { async { parallel.withPermit { source(it) } } }.awaitAll() }
         }
         prefs.saveProximity(widgetId, state)
     }

@@ -25,7 +25,8 @@ L'éditeur de [Tracéo](https://gotraceo.fr), un particulier agissant à titre n
 ## Ce qui reste sur le téléphone
 
 Ces données sont enregistrées dans l'espace privé de l'application, auquel les autres applications n'ont
-pas accès. Elles sont exclues de la sauvegarde Android en ligne : elles ne partent sur aucun compte.
+pas accès. Elles sont exclues de la sauvegarde Android en ligne, et du transfert vers un nouveau
+téléphone : elles ne partent sur aucun compte ni sur aucun autre appareil.
 
 - La configuration de chaque widget (ligne, arrêt, sens, couleur, notification, plage horaire) et les
   derniers passages reçus.

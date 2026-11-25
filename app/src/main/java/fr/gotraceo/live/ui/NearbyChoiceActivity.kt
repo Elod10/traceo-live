@@ -3,8 +3,10 @@ package fr.gotraceo.live.ui
 import android.app.Activity
 import android.appwidget.AppWidgetManager
 import android.content.Context
+import android.graphics.Bitmap
 import android.os.Bundle
 import android.text.method.LinkMovementMethod
+import android.util.LruCache
 import android.view.Gravity
 import android.view.LayoutInflater
 import android.view.View
@@ -18,6 +20,7 @@ import android.widget.TextView
 import fr.gotraceo.live.R
 import fr.gotraceo.live.data.DataSources
 import fr.gotraceo.live.data.Directions
+import fr.gotraceo.live.data.Line
 import fr.gotraceo.live.data.NearbyLine
 import fr.gotraceo.live.data.NearbyLookup
 import fr.gotraceo.live.data.PassageSnapshot
@@ -35,10 +38,11 @@ import fr.gotraceo.live.widget.WidgetUpdater
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.NonCancellable
-import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import kotlinx.coroutines.withContext
 
 /** Feuille ouverte par le double toucher d'un widget automatique : les lignes proches, à choisir. */
@@ -85,8 +89,10 @@ class NearbyChoiceActivity : Activity() {
 
     override fun onDestroy() {
         scope.cancel()
-        // Sans choix, l'arrêt ne change pas : seuls les passages sont actualisés.
-        if (widgetId != AppWidgetManager.INVALID_APPWIDGET_ID && !chosen) WidgetUpdater.requestRefresh(this, widgetId)
+        // Sans choix, l'arrêt ne change pas : seuls les passages sont actualisés (pas sur simple rotation).
+        if (widgetId != AppWidgetManager.INVALID_APPWIDGET_ID && !chosen && !isChangingConfigurations) {
+            WidgetUpdater.requestRefresh(this, widgetId)
+        }
         super.onDestroy()
     }
 
@@ -117,14 +123,15 @@ class NearbyChoiceActivity : Activity() {
         }
     }
 
-    /** Chaque ligne demande une requête : seules les premières sont interrogées. */
+    /** Seules les premières lignes sont interrogées ; avec une clé, celles d'une même zone partagent une requête. */
     private fun loadPassages(ranked: List<RankedLine>) {
-        // Les lignes proposées sont toutes du réseau où l'on se trouve.
-        val source = Sources.passages(this@NearbyChoiceActivity, ranked.firstOrNull()?.nearby?.line?.networkId ?: return)
+        // Chaque ligne est demandée au réseau qui est le sien, comme pour le widget À proximité.
+        val source = Sources.proximity(this@NearbyChoiceActivity)
         val hasKey = prefs.hasApiKey
+        val parallel = Semaphore(MAX_PARALLEL_REQUESTS)
         ranked.forEach { line ->
             scope.launch {
-                val snapshot = async(Dispatchers.IO) { AutoMode.fetch(source, line.nearby) }.await().getOrNull()
+                val snapshot = withContext(Dispatchers.IO) { parallel.withPermit { source(line.nearby) } }.getOrNull()
                 adapter.setPassage(line.nearby.line.id, snapshot?.let { nextPassage(it, line.nearby, hasKey) }, loaded = snapshot != null)
             }
         }
@@ -132,7 +139,9 @@ class NearbyChoiceActivity : Activity() {
 
     private fun nextPassage(snapshot: PassageSnapshot, nearby: NearbyLine, hasKey: Boolean): Passage? {
         val now = System.currentTimeMillis()
-        val departures = if (DataSources.dropsTerminusArrivals(nearby.line.networkId, viaTraceo = !hasKey)) {
+        // Sans clé, ou en repli d'une clé dont le quota est épuisé, les passages viennent de Tracéo.
+        val viaTraceo = !hasKey || snapshot.viaTraceo
+        val departures = if (DataSources.dropsTerminusArrivals(nearby.line.networkId, viaTraceo)) {
             Directions.withoutTerminusArrivals(snapshot.departures, nearby.stopName)
         } else {
             snapshot.departures
@@ -171,6 +180,7 @@ class NearbyChoiceActivity : Activity() {
         private val onStar: (Row) -> Unit,
     ) : BaseAdapter() {
         private val inflater = LayoutInflater.from(context)
+        private val badgeCache = LruCache<String, Bitmap>(32)
         private var rows: List<Row> = emptyList()
         private val favorites = favorites.toMutableSet()
 
@@ -200,7 +210,9 @@ class NearbyChoiceActivity : Activity() {
             val view = convertView ?: inflater.inflate(R.layout.item_nearby, parent, false)
             val row = getItem(position)
             val line = row.nearby.line
-            view.findViewById<ImageView>(R.id.nearby_badge).setImageBitmap(BadgeRenderer.render(context, line, BADGE_DP))
+            val badge = view.findViewById<ImageView>(R.id.nearby_badge)
+            badge.setImageBitmap(badgeFor(line))
+            badge.contentDescription = UiText.lineTitle(line)
             view.findViewById<TextView>(R.id.nearby_stop).text = row.nearby.stopName
             view.findViewById<TextView>(R.id.nearby_detail).text = detail(row, line.id == shownLineId)
             val wait = view.findViewById<TextView>(R.id.nearby_wait)
@@ -218,6 +230,12 @@ class NearbyChoiceActivity : Activity() {
             )
             star.setOnClickListener { onStar(row) }
             return view
+        }
+
+        private fun badgeFor(line: Line): Bitmap {
+            // La forme de la pastille dépend du réseau : le rond du métro n'existe qu'en Île-de-France.
+            val key = "${line.networkId}|${line.mode}|${line.shortName}|${line.color}|${line.textColor}"
+            return badgeCache.get(key) ?: BadgeRenderer.render(context, line, BADGE_DP).also { badgeCache.put(key, it) }
         }
 
         private fun detail(row: Row, shown: Boolean): String {
@@ -243,6 +261,7 @@ class NearbyChoiceActivity : Activity() {
     private companion object {
         const val SHEET_HEIGHT = 0.7f
         const val PASSAGES_SHOWN = 8
+        const val MAX_PARALLEL_REQUESTS = 4
         const val LOCATING_POLL_MS = 100L
         const val BADGE_DP = 32f
         const val WAIT_TEXT_SP = 30f
