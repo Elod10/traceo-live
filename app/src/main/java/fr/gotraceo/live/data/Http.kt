@@ -5,6 +5,9 @@ import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
+import java.time.ZonedDateTime
+import java.time.format.DateTimeFormatter
+import java.time.format.DateTimeParseException
 import java.util.zip.GZIPInputStream
 
 /** Mini client HTTP (GET uniquement) basé sur HttpURLConnection. */
@@ -110,4 +113,11 @@ object Http {
     }
 
     fun encode(s: String): String = URLEncoder.encode(s, "UTF-8")
+
+    /** Heure d'un en-tête Date (« Fri, 20 Nov 2026 17:17:29 GMT »), en millisecondes ; null s'il est absent ou illisible. */
+    fun parseDate(value: String?): Long? = try {
+        value?.let { ZonedDateTime.parse(it.trim(), DateTimeFormatter.RFC_1123_DATE_TIME).toInstant().toEpochMilli() }
+    } catch (e: DateTimeParseException) {
+        null
+    }
 }

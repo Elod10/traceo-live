@@ -54,6 +54,22 @@ class NearbyRulesTest {
     }
 
     @Test
+    fun aLineWithoutRealtimeIsNeverRanked() {
+        // Brest : le téléphérique n'est jamais dans le flux ; son arrêt, tout près, ne compte pas.
+        val cable = Line("C", "Téléphérique", "C", "cableway", networkId = "brest", realtime = false)
+        val tram = Line("A", "Tram A", "A", "tram", networkId = "brest")
+        val ranking = rank(
+            listOf(near(cable, "Capucins", 20), near(tram, "Château", 600)),
+            favorites = setOf(cable.key),
+            picked = cable.key,
+            allowed = setOf("cableway", "tram"),
+        )
+        assertEquals(listOf("A"), ranking.codes())
+        assertEquals(600, ranking.nearestM)
+        assertFalse(ranking.noStop)
+    }
+
+    @Test
     fun aTramCountsHalfOfTheRailBonus() {
         val ranking = rank(listOf(near(b69, "A", 50), near(t3, "B", 100)))
         assertEquals(listOf("T3a", "69"), ranking.codes())

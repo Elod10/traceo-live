@@ -21,7 +21,7 @@ class TraceoContractTest {
 
     private companion object {
         /** Un identifiant d'exemple : il vient toujours du catalogue. */
-        const val NETWORK = "tcat"
+        const val NETWORK = "troyes"
         const val CATALOG_PATH = "/api/reseaux"
         const val LINES_PATH = "/api/reseaux/$NETWORK/lines"
         const val STATIONS_PATH = "/api/reseaux/$NETWORK/stations"
@@ -36,7 +36,7 @@ class TraceoContractTest {
             "Métropole), mises à disposition sous licence ODbL."
 
         const val CATALOG = """{"version": 1, "networks": [{
-            "id": "tcat", "name": "TCAT", "city": "Troyes",
+            "id": "troyes", "name": "TCAT", "city": "Troyes",
             "bbox": {"latMin": 48.169, "latMax": 48.4139, "lonMin": 3.8903, "lonMax": 4.2591},
             "modes": ["bus"], "refreshSec": 60, "status": "ok",
             "attribution": {"source": "TCAT, Troyes Champagne Métropole",

@@ -34,7 +34,7 @@ class TraceoNetworksTest {
                  "textColor": "#FFFFFF", "mode": {"key": "bus", "label": "Bus"}},
                 {"code": "sans identifiant"},
                 {"id": "1", "code": "1", "name": "Chartreux - Pont-Sainte-Marie", "color": "#E2001A",
-                 "textColor": "#FFFFFF", "mode": {"key": "bus", "label": "Bus"}}],
+                 "textColor": "#FFFFFF", "mode": {"key": "bus", "label": "Bus"}, "realtime": false}],
             "stops": [
                 {"zone": "1:ACACI", "name": "Acacias", "town": null, "lat": 48.29731, "lon": 4.07412, "lines": [0, 2]},
                 {"zone": "1:ACACI", "name": "Acacias", "town": null, "lat": 48.29750, "lon": 4.07430, "lines": [0]},
@@ -339,6 +339,7 @@ class TraceoNetworksTest {
         assertEquals(SiriParser.parseTime("2026-11-11T03:10:00Z"), index.builtAt)
         assertEquals(listOf("2B", "1"), index.lines.map { it.id })
         assertTrue(index.lines.all { it.networkId == TCAT })
+        assertEquals("`realtime` comme la route des lignes", listOf(true, false), index.lines.map { it.realtime })
 
         assertEquals(
             listOf(
@@ -380,9 +381,14 @@ class TraceoNetworksTest {
         val area = StopIndexStore(file, TCAT) { throw IOException("hors ligne") }.around(48.2973, 4.0741, 500)!!
         assertEquals(3, area.stops.size)
         assertTrue(area.lines.values.all { it.networkId == TCAT })
-        val nearest = NearbyRules.linesAround(area, GeoPoint(48.2973, 4.0741)).first { it.line.id == "2B" }
+        val around = NearbyRules.linesAround(area, GeoPoint(48.2973, 4.0741))
+        val nearest = around.first { it.line.id == "2B" }
         assertEquals("1:ACACI", nearest.stopId)
         assertEquals("F29400", nearest.line.color)
+        // La ligne sans temps réel le reste une fois sur le téléphone : À proximité ne la propose pas.
+        assertFalse(around.first { it.line.id == "1" }.line.realtime)
+        val ranking = NearbyRules.rank(around, emptySet(), null, nightService = false, modes = setOf("bus"))
+        assertEquals(listOf("2B"), ranking.list.map { it.nearby.line.id })
     }
 
     @Test

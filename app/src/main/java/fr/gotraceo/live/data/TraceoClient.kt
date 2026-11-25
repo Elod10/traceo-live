@@ -34,10 +34,12 @@ class TraceoException(
  * Ce fichier n'utilise aucune API Android afin d'être testable sur JVM.
  *
  * @param warmedLines lignes dont les arrêts ont déjà été redemandés après un 503
+ * @param clock horloge du téléphone, pour ramener l'heure d'un réveil à la sienne
  */
 class TraceoClient(
     private val baseUrl: String = BASE_URL,
     private val warmedLines: MutableSet<String> = warmedInThisProcess,
+    private val clock: () -> Long = System::currentTimeMillis,
 ) : PassageSource {
 
     companion object {
@@ -176,7 +178,15 @@ class TraceoClient(
     fun departures(stopId: String, lineId: String, networkId: String): PassageSnapshot {
         if (Networks.isIdfm(networkId)) return departures(stopId, lineId)
         val url = networkUrl(networkId) + "/passages?line=" + Http.encode(lineId) + "&stop=" + Http.encode(stopId)
-        return snapshot(get(url, PASSAGES_READ_TIMEOUT_MS, UNKNOWN_STOP_MESSAGE, NetworkRoute.PASSAGES), stopId, lineId)
+        val response = request(url, PASSAGES_READ_TIMEOUT_MS, UNKNOWN_STOP_MESSAGE, NetworkRoute.PASSAGES)
+        val receivedAt = clock()
+        val snapshot = snapshot(json(response), stopId, lineId)
+        // Pendant un réveil, le prochain relevé est à quelques secondes : un téléphone dont l'horloge
+        // est décalée d'autant manquerait son retour. L'heure annoncée est donc ramenée à celle du
+        // téléphone, d'après l'heure du serveur que donne l'en-tête Date de la même réponse.
+        if (snapshot.waking != true || snapshot.nextAt == null) return snapshot
+        val serverNow = Http.parseDate(response.headers["date"]) ?: return snapshot
+        return snapshot.copy(nextAt = receivedAt + (snapshot.nextAt - serverNow))
     }
 
     override fun passages(stopId: String, lineId: String): PassageSnapshot = departures(stopId, lineId)
@@ -211,6 +221,9 @@ class TraceoClient(
             // Absent des anciennes versions de Tracéo, null quand la collecte est suspendue.
             nextAt = SiriParser.parseTime(root.optStringOrNull("nextAt")),
             viaTraceo = true,
+            waking = if (root.has("waking") && !root.isNull("waking")) root.optBoolean("waking") else null,
+            // Un statut inconnu ne dit rien : contrairement au catalogue, il n'est pas pris pour `ok`.
+            status = root.optStringOrNull("status")?.let { key -> NetworkStatus.entries.firstOrNull { it.key == key } },
         )
     }
 
@@ -223,7 +236,11 @@ class TraceoClient(
      * @param network route d'un réseau hors Île-de-France, null pour le catalogue et les routes
      *        franciliennes, dont les messages ne changent pas
      */
-    private fun get(url: String, readTimeoutMs: Int, notFoundMessage: String, network: NetworkRoute? = null): JSONObject {
+    private fun get(url: String, readTimeoutMs: Int, notFoundMessage: String, network: NetworkRoute? = null): JSONObject =
+        json(request(url, readTimeoutMs, notFoundMessage, network))
+
+    /** La réponse d'une route, si elle a réussi ; ses en-têtes restent lisibles. */
+    private fun request(url: String, readTimeoutMs: Int, notFoundMessage: String, network: NetworkRoute? = null): Http.Response {
         val response = try {
             Http.get(url, readTimeoutMs = readTimeoutMs)
         } catch (e: IOException) {
@@ -243,33 +260,45 @@ class TraceoClient(
             )
             else -> throw TraceoException(TraceoException.Kind.SERVER, "Erreur de Tracéo (HTTP ${response.code}).")
         }
-        return try {
-            JSONObject(response.body)
-        } catch (e: Exception) {
-            throw invalidResponse(e)
-        }
+        return response
+    }
+
+    private fun json(response: Http.Response): JSONObject = try {
+        JSONObject(response.body)
+    } catch (e: Exception) {
+        throw invalidResponse(e)
     }
 
     /**
-     * Un 404 des routes d'un réseau dit ce que Tracéo ne connaît pas : « Réseau inconnu. », « Ligne
-     * inconnue. », « Arrêt inconnu sur cette ligne. ». « Route inconnue. » vient d'un serveur qui ne
-     * sert pas ces routes : le widget n'est pas faux, il garde donc ses passages, comme sur un 503.
-     * Il en va de même d'un 404 qui n'est pas du JSON : Tracéo répond toujours en JSON, ce 404 vient
-     * donc d'un intermédiaire. Un message que l'application ne reconnaît pas reste un 404 sans précision.
+     * Un 404 des routes d'un réseau dit ce que Tracéo ne connaît pas, par son `code` : `network`,
+     * `line`, `stop`. `route` vient d'un serveur qui ne sert pas ces routes : le widget n'est pas
+     * faux, il garde donc ses passages, comme sur un 503. Il en va de même d'un 404 qui n'est pas du
+     * JSON : Tracéo répond toujours en JSON, ce 404 vient donc d'un intermédiaire.
+     *
+     * Sans `code` (serveur d'avant), c'est le message qui le dit : « Réseau inconnu. », « Ligne
+     * inconnue. », « Arrêt inconnu sur cette ligne. », « Route inconnue. ». Ce que l'application ne
+     * reconnaît pas reste un 404 sans précision.
      */
     private fun notFound(body: String, fallback: String, network: NetworkRoute?): TraceoException {
         if (network == null) return TraceoException(TraceoException.Kind.NOT_FOUND, fallback)
-        val said = try {
-            normalizeLabel(JSONObject(body).optStringOrNull("error")).trimEnd('.').trim()
+        val error = try {
+            JSONObject(body)
         } catch (e: Exception) {
             return TraceoException(TraceoException.Kind.UNAVAILABLE, ROUTES_MISSING_MESSAGE)
         }
-        val (missing, message) = when {
-            said == "route inconnue" ->
-                return TraceoException(TraceoException.Kind.UNAVAILABLE, ROUTES_MISSING_MESSAGE)
-            said == "reseau inconnu" -> TraceoException.Missing.NETWORK to "Réseau inconnu de Tracéo"
-            said == "ligne inconnue" -> TraceoException.Missing.LINE to "Ligne inconnue de Tracéo"
-            said.startsWith("arret inconnu") -> TraceoException.Missing.STOP to "Arrêt inconnu sur cette ligne"
+        val said = normalizeLabel(error.optStringOrNull("error")).trimEnd('.').trim()
+        val code = error.optStringOrNull("code") ?: when {
+            said == "route inconnue" -> "route"
+            said == "reseau inconnu" -> "network"
+            said == "ligne inconnue" -> "line"
+            said.startsWith("arret inconnu") -> "stop"
+            else -> null
+        }
+        val (missing, message) = when (code) {
+            "route" -> return TraceoException(TraceoException.Kind.UNAVAILABLE, ROUTES_MISSING_MESSAGE)
+            "network" -> TraceoException.Missing.NETWORK to "Réseau inconnu de Tracéo"
+            "line" -> TraceoException.Missing.LINE to "Ligne inconnue de Tracéo"
+            "stop" -> TraceoException.Missing.STOP to "Arrêt inconnu sur cette ligne"
             else -> return TraceoException(TraceoException.Kind.NOT_FOUND, fallback)
         }
         // À la configuration, il n'y a pas de widget à reconfigurer : le message s'arrête au constat.

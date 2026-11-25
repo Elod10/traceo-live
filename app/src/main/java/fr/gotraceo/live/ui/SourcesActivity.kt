@@ -74,8 +74,12 @@ class SourcesActivity : Activity() {
         )
         val dates = DateFormat.getDateInstance(DateFormat.LONG, Locale.FRENCH)
         val paragraphs = networks.joinToString("<br><br>") { network ->
-            // L'ODbL et la Licence Ouverte demandent la date des données : celle des horaires compilés.
-            NetworkMentions.paragraph(network, network.indexAt?.let { dates.format(Date(it)) })
+            // La Licence Ouverte demande la date des données : celle du jeu, sinon celle des horaires compilés.
+            NetworkMentions.paragraph(
+                network,
+                indexDate = network.indexAt?.let { dates.format(Date(it)) },
+                updatedDate = network.attribution?.updatedAt?.let { dates.format(Date(it)) },
+            )
         }
         findViewById<TextView>(R.id.networks_about).apply {
             text = Mentions.html(

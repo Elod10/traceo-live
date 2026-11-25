@@ -47,8 +47,13 @@ data class Attribution(
     /** Nom court de la licence : « ODbL ». */
     val licence: String?,
     val licenceUrl: String?,
-    /** Mention complète, prête à afficher. */
+    /** Mention complète, prête à afficher : elle commence toujours par « Contient des informations ». */
     val text: String?,
+    /**
+     * Dernière mise à jour du jeu de données par son producteur, d'après le catalogue national :
+     * la date que demande la Licence Ouverte. Null si Tracéo ne la connaît pas.
+     */
+    val updatedAt: Long? = null,
 ) {
     fun toJson(): JSONObject = JSONObject()
         .put("source", source)
@@ -56,6 +61,7 @@ data class Attribution(
         .putOpt("licence", licence)
         .putOpt("licenceUrl", licenceUrl)
         .putOpt("text", text)
+        .putOpt("updatedAt", updatedAt)
 
     companion object {
         fun fromJson(o: JSONObject): Attribution? {
@@ -66,6 +72,8 @@ data class Attribution(
                 licence = o.optStringOrNull("licence"),
                 licenceUrl = o.optStringOrNull("licenceUrl"),
                 text = o.optStringOrNull("text"),
+                // Date ISO dans la réponse de Tracéo, millisecondes dans le fichier du téléphone.
+                updatedAt = SiriParser.parseTime(o.optStringOrNull("updatedAt")) ?: o.optLongOrNull("updatedAt"),
             )
         }
     }
@@ -103,7 +111,10 @@ data class Network(
     val status: NetworkStatus = NetworkStatus.OK,
     /** Null pour l'Île-de-France, dont les mentions sont écrites dans l'application. */
     val attribution: Attribution? = null,
-    /** Date de compilation des horaires : elle change quand lignes, arrêts et index sont à recharger. */
+    /**
+     * Date du référentiel du réseau : elle ne change que quand ses lignes, ses stations, son index,
+     * son emprise ou ses modes changent, donc quand ils sont à recharger.
+     */
     val indexAt: Long? = null,
 ) {
     val isIdfm: Boolean get() = Networks.isIdfm(id)

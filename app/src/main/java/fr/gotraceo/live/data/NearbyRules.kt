@@ -111,6 +111,9 @@ object NearbyRules {
      * le RER et le train comptent 150 m de moins et le tram 75 m. On garde ce qui reste à moins de
      * 400 m de plus que l'arrêt le plus proche, sans dépasser 2 km.
      *
+     * Une ligne que Tracéo sait absente du flux temps réel n'est pas classée, même choisie ici ou
+     * favorite : elle n'aurait jamais de passage à montrer, et prendrait la place d'une ligne qui en a.
+     *
      * @param favorites clés des lignes favorites (cf. [Line.key])
      * @param pickedLineKey clé de la ligne choisie à cet endroit
      * @param modes modes acceptés par la source de passages
@@ -122,7 +125,7 @@ object NearbyRules {
         nightService: Boolean,
         modes: Set<String>,
     ): NearbyRanking {
-        val usable = candidates.filter { it.line.mode in modes }
+        val usable = candidates.filter { it.line.mode in modes && it.line.realtime }
         val nearest = usable.filter { !isNightLine(it.line) }.minOfOrNull { it.distanceM }
         val noStop = nearest == null || nearest > SEARCH_CAP_M
 

@@ -144,13 +144,28 @@ object StopIndexBuilder {
     }
 }
 
-/** Format du fichier : les lignes, puis un enregistrement par arrêt, qu'on peut sauter sans le décoder. */
+/**
+ * Format du fichier : les lignes, puis un enregistrement par arrêt, qu'on peut sauter sans le décoder.
+ * La version 2 dit, pour chaque ligne, si elle a du temps réel ; un fichier de la version 1 reste
+ * lisible, toutes ses lignes en ayant.
+ */
 object StopIndexFile {
 
     private const val MAGIC = 0x54524958
-    private const val VERSION = 1
+    private const val VERSION = 2
+    private const val OLDEST_VERSION = 1
+
+    /** Première version qui retient les lignes sans temps réel. */
+    const val VERSION_WITH_REALTIME = 2
+    private const val FLAG_NO_REALTIME = 1
     private const val COORD_SCALE = 100_000.0
     private const val METERS_PER_DEGREE = 111_320.0
+
+    /** L'en-tête d'un fichier : sa version et sa date de constitution. */
+    class Header(val version: Int, val savedAt: Long) {
+        /** Faux pour un fichier qui ne dit pas quelles lignes n'ont pas de temps réel. */
+        val knowsRealtime: Boolean get() = version >= VERSION_WITH_REALTIME
+    }
 
     @Throws(IOException::class)
     fun write(out: OutputStream, savedAt: Long, lines: List<Line>, stops: List<IndexedStop>) {
@@ -164,6 +179,7 @@ object StopIndexFile {
             indexOfLine[line.id] = index
             listOf(line.id, line.name, line.shortName, line.mode, line.subMode, line.network, line.operator, line.color, line.textColor)
                 .forEach { data.writeUTF(it.orEmpty()) }
+            data.writeByte(if (line.realtime) 0 else FLAG_NO_REALTIME)
         }
         data.writeInt(stops.size)
         val buffer = ByteArrayOutputStream()
@@ -184,13 +200,21 @@ object StopIndexFile {
         data.flush()
     }
 
-    /** Date de constitution du fichier, ou null s'il est illisible. */
-    fun savedAt(input: InputStream): Long? = try {
+    /** En-tête du fichier, ou null s'il est illisible. */
+    fun header(input: InputStream): Header? = try {
         val data = DataInputStream(input)
-        if (data.readInt() == MAGIC && data.readInt() == VERSION) data.readLong() else null
+        if (data.readInt() == MAGIC) {
+            val version = data.readInt()
+            if (version in OLDEST_VERSION..VERSION) Header(version, data.readLong()) else null
+        } else {
+            null
+        }
     } catch (e: IOException) {
         null
     }
+
+    /** Date de constitution du fichier, ou null s'il est illisible. */
+    fun savedAt(input: InputStream): Long? = header(input)?.savedAt
 
     /**
      * Arrêts situés dans le carré de côté 2 × [radiusM] autour du point : les autres sont sautés.
@@ -216,12 +240,15 @@ object StopIndexFile {
     /** @param wanted vrai pour un arrêt à garder, d'après sa latitude et sa longitude entières */
     private inline fun read(input: InputStream, networkId: String, wanted: (Int, Int) -> Boolean): StopIndexArea {
         val data = DataInputStream(BufferedInputStream(input))
-        if (data.readInt() != MAGIC || data.readInt() != VERSION) throw IOException("Index d'arrêts illisible")
+        if (data.readInt() != MAGIC) throw IOException("Index d'arrêts illisible")
+        val version = data.readInt()
+        if (version !in OLDEST_VERSION..VERSION) throw IOException("Index d'arrêts illisible")
         data.readLong()
         val lineCount = data.readInt()
         val lines = ArrayList<Line>(lineCount)
         repeat(lineCount) {
             val values = List(9) { data.readUTF() }
+            val flags = if (version >= VERSION_WITH_REALTIME) data.readUnsignedByte() else 0
             lines.add(
                 Line(
                     id = values[0],
@@ -234,6 +261,7 @@ object StopIndexFile {
                     color = values[7].ifEmpty { null },
                     textColor = values[8].ifEmpty { null },
                     networkId = networkId,
+                    realtime = (flags and FLAG_NO_REALTIME) == 0,
                 ),
             )
         }
@@ -323,14 +351,16 @@ class StopIndexStore(
     private val networkIndex: (String) -> NetworkIndex = { TraceoClient().index(it) },
 ) {
 
-    fun savedAt(): Long? {
+    private fun header(): StopIndexFile.Header? {
         if (!file.exists()) return null
         return try {
-            file.inputStream().use(StopIndexFile::savedAt)
+            file.inputStream().use(StopIndexFile::header)
         } catch (e: IOException) {
             null
         }
     }
+
+    fun savedAt(): Long? = header()?.savedAt
 
     /** Vrai s'il faut retélécharger : chaque semaine en Wi-Fi, chaque mois sur le réseau mobile. */
     fun isStale(now: Long, unmetered: Boolean): Boolean {
@@ -339,12 +369,14 @@ class StopIndexStore(
     }
 
     /**
-     * Vrai si l'index d'un réseau du catalogue est à recharger : absent, ou tiré d'horaires plus
-     * anciens que ceux que le catalogue annonce ([Network.indexAt]).
+     * Vrai si l'index d'un réseau du catalogue est à recharger : absent, tiré d'horaires plus
+     * anciens que ceux que le catalogue annonce ([Network.indexAt]), ou, hors Île-de-France, reçu
+     * avant que le téléphone retienne les lignes sans temps réel : À proximité les proposerait.
      */
     fun isOutdated(indexAt: Long?): Boolean {
-        val saved = savedAt() ?: return true
-        return indexAt != null && indexAt > saved
+        val header = header() ?: return true
+        if (!Networks.isIdfm(networkId) && !header.knowsRealtime) return true
+        return indexAt != null && indexAt > header.savedAt
     }
 
     /**

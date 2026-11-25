@@ -75,12 +75,12 @@ documentation d'API ; l'appli les suit.
 | Mode | `modes[]` et `mode.key`, parmi `metro`, `tram`, `rail`, `bus`, `boat`, `cable`, `funicular` | `TransportMode` ; `cable` devient `cableway` (`Networks.appMode`) |
 | Cadence | `refreshSec` | `refreshSec`, `sourceMinutes` |
 | Statut | `status` : `ok`, `stale` (flux muet), `off` (réseau coupé) | `NetworkStatus` |
-| Mention | `attribution` : `source`, `url`, `licence`, `licenceUrl`, `text` | `Attribution` |
+| Mention | `attribution` : `source`, `url`, `licence`, `licenceUrl`, `text`, `updatedAt` | `Attribution` |
 | Horaires compilés | `indexAt` du catalogue, égal au `builtAt` de l'index | `indexAt` |
 | Ligne | `id` (opaque), `code` (pastille), `name`, `color`, `textColor`, `mode` | `Line` |
 | Station | `stations[].id`, et `zone` dans l'index : une zone d'arrêt, tous les quais, les deux sens | `Stop` |
 | Quai | une entrée de `stops[]` dans l'index | `IndexedStop` |
-| Relevé | `fetchedAt`, `ageSec`, `fresh`, `nextAt` | `PassageSnapshot` |
+| Relevé | `fetchedAt`, `ageSec`, `fresh`, `nextAt`, `waking`, `status` | `PassageSnapshot` |
 
 À l'écran, l'appli dit « réseau », « ville », « ligne », « arrêt » et « relevé ». Elle ne dit ni
 « station » ni « zone ».
@@ -94,7 +94,7 @@ Le contrat qui fait foi est celui que Tracéo documente : routes 79 à 83 de son
 | Point | Contrat v0 du pilote | Servi par Tracéo |
 |---|---|---|
 | Identifiant de ligne | Exemple « 2B » | Le `route_id` du réseau : « 204 » pour la ligne dont le `code` est « 2B » |
-| `realtime` | Facultatif | Jamais servi pour l'instant |
+| `realtime` | Facultatif | Servi pour les réseaux mesurés depuis MR1 (Q11), routes 80 et 83 ; absent pour un réseau non mesuré (Troyes) |
 | `attribution.text` | Exemple court | La mention complète : « Contient des informations du jeu … » |
 | Réseau jamais relevé | Non décrit | `fetchedAt` et `ageSec` nuls, `fresh` faux, `nextAt` à l'heure du réveil, quelques secondes plus tard |
 | Réseau coupé | `status` à `off` | En plus : ses routes répondent 503 et `nextAt` est nul |
@@ -177,7 +177,7 @@ Le détail est dans [prompt-traceo-reseaux-ouverts.md](prompt-traceo-reseaux-ouv
 
 | | Question | Proposition |
 |---|---|---|
-| R1 | Règle des identifiants de réseau, et sort de `tcat` | La ville ; renommer Troyes tant que rien n'est en production. À trancher dans le dépôt Tracéo |
+| R1 | Règle des identifiants de réseau, et sort de `tcat` | **Tranché par Tracéo (MR1)** : la ville. `tcat` est devenu `troyes` ; `idfm` n'est jamais attribué |
 | R2 | Seuils de qualification d'un réseau | Proposés par Tracéo après une première campagne |
 | R3 | Un réseau qualifié sans tous ses modes est-il servi ? | Non : c'est le critère du groupe 1 |
 | R4 | Mise en production réseau par réseau ou d'un bloc | Par vagues, après essai sur téléphone en préproduction |
@@ -388,21 +388,128 @@ enregistrées conformes au chapitre 5.
 - **Accords.** « d'Irigo », « de TBM » ; le mot « licence » n'est pas répété, où qu'il soit dans le
   nom de la licence.
 
+### Lot 13 : contrat MR1 de Tracéo
+
+Le 20 novembre 2026, la préproduction de Tracéo sert la brique MR1 : dix réseaux, tous « à
+l'essai » (un réseau à l'essai peut encore être retiré). Ce lot aligne l'appli sur ce qu'elle sert.
+Il a été vérifié contre elle : le client de l'appli a lu, pour les dix réseaux, le catalogue, les
+lignes, les arrêts d'une ligne, les passages, l'index et les trois 404 d'un réseau.
+
+- **Les 404 se lisent à leur `code`** : `network`, `line`, `stop`, `route`. Un message reformulé
+  ne change plus rien. Sans `code`, l'appli lit le message comme avant ; un `code` qu'elle ne
+  connaît pas l'emporte sur un message qu'elle connaît, et donne un 404 sans précision.
+- **Le réveil se lit à `waking`.** Vrai : le widget revient à l'heure annoncée. Faux : il ne revient
+  pas, même si le relevé est ancien et le prochain annoncé tout près (flux en panne, relevé en
+  retard, que Tracéo annonce maintenant à 30 secondes). La déduction du lot 7 ne sert plus que si le
+  champ manque. Les retours restent bornés à deux. Mesuré en préproduction : le premier relevé est
+  là une à deux secondes après la première requête ; le widget revient 5 à 8 secondes après.
+- **Le réveil ne dépend plus de l'horloge du téléphone.** Pendant un réveil, `nextAt` est ramené à
+  l'heure du téléphone d'après l'en-tête `Date` de la même réponse : `nextAt` moins `Date`, deux
+  secondes en préproduction, ajoutées à l'heure de réception. Sans en-tête lisible, l'heure du retour
+  est bornée entre la réponse et 20 secondes après. C'est la réponse de l'appli à Q2 : rien à ajouter
+  côté serveur. Hors réveil, `nextAt` reste comparé à l'horloge du téléphone, comme en Île-de-France.
+- **Date du jeu de données.** `attribution.updatedAt` est lu et gardé dans le catalogue du téléphone.
+  L'écran Sources et licences dit « Jeu de données mis à jour le … », la date que demande la Licence
+  Ouverte ; sans elle, il garde « Horaires compilés par Tracéo le … ».
+- **Couleur de texte.** Tracéo sert `null` quand le réseau ne publie pas de couleur de texte
+  (Saint-Étienne et Dijon, toutes leurs lignes) : l'appli choisit le noir ou le blanc. Un noir servi
+  est donc un choix du réseau, gardé s'il se lit, comme en Île-de-France : la règle du lot 9 qui
+  l'ignorait est retirée. Relevé le 20 novembre : sur les 138 lignes à texte noir publié, le noir
+  est partout le plus lisible des deux, rien ne change à l'écran. Le blanc avec un texte noir reste
+  compté comme une absence de couleur (lot 9) ; aucun réseau n'en sert.
+- **Stations qui réunissent leurs quais.** Tracéo répond pour la station entière, quel que soit le
+  quai demandé : un arrêt que l'appli avait réuni de deux quais (lot 10) recevrait chaque passage
+  deux fois. Hors Île-de-France, les doublons sont retirés, après le filtre des sens, qui se lit par
+  quai. Le regroupement de l'appli (200 m) ne se déclenche plus, Tracéo regroupant jusqu'à 500 m ;
+  il reste pour un serveur qui ne le ferait pas. Un widget posé sur un seul quai reçoit maintenant
+  toute la station, les deux sens.
+- **Identifiants de réseau.** `tcat` est devenu `troyes` ; l'appli n'en écrit aucun, seuls ses tests
+  changent. Un widget posé sur `tcat` reçoit « Réseau inconnu » et demande à être refait : il n'en
+  existe que sur les téléphones d'essai.
+- **Rien à changer** pour `indexAt`, qui ne change plus qu'avec le référentiel (Q7) ; le début de
+  `attribution.text` (Q9) ; le tri du catalogue par ville ; `refreshSec` à 120 ; un réseau coupé
+  gardé au catalogue en `off`, déjà grisé à l'étape « Réseau » ; l'en-tête `Etag` écrit autrement
+  par le relais de la préproduction (l'appli lit les en-têtes sans tenir compte de la casse, et ne
+  se sert pas de l'ETag).
+- **Un réseau aux horaires périmés.** À Troyes et à Tours, les horaires publiés ne correspondent
+  plus au flux : le relevé est frais, ne donne aucun passage, et le réseau est `stale`. Le widget
+  ne relit le catalogue qu'une fois par jour : Tracéo met donc le statut dans la réponse des
+  passages (Q10). Quand il vaut `stale`, hors réveil, et qu'il n'y a rien à montrer, le widget, sa
+  notification et la tuile disent « Temps réel interrompu sur ce réseau pour le moment » (« Sans
+  temps réel » en pastille), au lieu de « Aucun passage » ; le format À proximité aussi. Pendant un
+  réveil, le statut est celui d'avant (`ok` après un redémarrage du serveur) : il ne compte pas, le
+  widget le lit au retour. Un statut absent ou inconnu ne dit rien. Tracéo dit maintenant les
+  horaires périmés dès le premier relevé, plus au troisième.
+
+### Premier essai sur téléphone (20 novembre 2026 au soir)
+
+APK de debug sur la préproduction. Widgets de Toulon (bateau 8M), Saint-Étienne (tram T3) et deux
+franciliens : passages, couleurs et réveil conformes. Trois remarques de l'utilisateur :
+
+- **Sens qui chargent sans fin au premier choix d'un arrêt d'un réseau endormi.** L'étape « Sens et
+  couleur » ne demandait les passages qu'une fois ; sur un réseau endormi, c'est la réponse du
+  réveil, vide, et l'écran n'y revenait pas. Corrigé : comme le widget, l'écran revient à l'heure
+  du premier relevé, deux fois au plus, sans écran d'attente, et l'aperçu du mode automatique de
+  même. Changer d'étape annule l'attente.
+- **Téléphériques sans temps réel.** Dans les captures de Tracéo d'un jour ouvré (19/11 22 h 34 →
+  20/11 19 h 25), le téléphérique du Faron (Toulon), celui de Brest et la navette Calypso de Rouen
+  n'apparaissent jamais dans le flux. Montrer leur mode ne mène qu'à « Aucun passage ». C'est au
+  serveur de le dire, lui seul voit le flux : question Q11. L'appli sait déjà traiter une ligne à
+  `realtime` faux, et ne propose que les modes que le catalogue annonce. En Île-de-France, le mode
+  « Câble / Funiculaire » n'apparaît qu'avec une clé : reste à vérifier sur téléphone si PRIM donne
+  des passages du Câble C1 et du funiculaire de Montmartre.
+- **Le Métro de Rouen.** Techniquement un tramway, mais le réseau le déclare métro dans ses
+  horaires (`route_type` 1) et tout le monde l'appelle « le Métro ». L'appli suit le mode servi ;
+  le changer serait une surcharge par ligne dans le registre de Tracéo. Tranché le 24 novembre :
+  il reste « Métro ».
+
+### Lignes sans temps réel (Q11, 25 novembre 2026)
+
+Tracéo sert Q11 en préproduction depuis le 25 novembre, après sa mesure finale sur une
+capture de 26,9 heures. Huit réseaux sur neuf portent `realtime` sur chaque ligne, routes 80 et 83 ;
+Troyes, pas encore mesuré, ne l'a pas (absent veut dire « on ne sait pas », lu comme vrai). Un mode
+dont aucune ligne n'a de temps réel sort de `modes` : plus de téléphérique à Brest ni à Toulon, plus
+de bateau à Rouen. Tours sort du registre : un widget posé dessus reçoit « Réseau inconnu », comme
+`tcat`.
+
+- **Le menu des modes** suit `modes` du catalogue, rien à changer : Brest propose Tramway et Bus,
+  Toulon Bus et Bateau, Rouen Métro et Bus.
+- **La liste des lignes** d'un mode montre toujours les lignes sans temps réel, grisées, avec
+  « Sans temps réel » en sous-titre ; on peut encore les choisir, l'étape des sens le redit. Elles
+  sont nombreuses à Rouen (73 sur 112) et à Toulon (47 sur 97).
+- **L'index des arrêts garde `realtime`.** Le fichier de l'index passe en version 2 : un octet par
+  ligne. Un fichier de la version 1 reste lisible, toutes ses lignes avec du temps réel ; celui
+  d'un autre réseau est retéléchargé une fois, celui de l'Île-de-France est gardé.
+- **À proximité ne classe pas une ligne sans temps réel**, même choisie à cet endroit ou favorite :
+  elle n'aurait jamais de passage, et prendrait la place d'une ligne qui en a. Sans cela, à l'arrêt
+  Isaac Newton de Rouen, le format À proximité aurait interrogé sept lignes sans temps réel sur
+  huit ; il ne garde que la F5. L'arrêt le plus proche se compte parmi les lignes qui restent : au
+  pied du téléphérique de Brest, ce sont les bus à 79 m.
+- **Vérifié contre la préproduction** par le client de l'appli : catalogue, menus des modes, lignes
+  et index des neuf réseaux (`realtime` égal entre les routes 80 et 83), classement autour d'un
+  quai sans temps réel à Brest, Toulon et Rouen, 404 `network` pour Tours.
+- **Limite connue** : un widget posé à la main garde le `realtime` de sa ligne au moment de la
+  configuration. Si une mesure suivante change la liste, il ne le saura qu'une fois refait. Même
+  défaut que pour la couleur ou le nom d'une ligne ; à traiter avec le rattachement du chapitre 12.
+
 ## 11. Questions à Tracéo
 
-Ce qui manque à l'appli dans le contrat, et qu'elle ne contourne qu'en attendant une réponse.
+Ce qui manquait à l'appli dans le contrat. La brique MR1 (20 novembre 2026) a répondu à toutes,
+sauf Q3, reportée ; Q10 et Q11 sont venues ensuite.
 
-| | Question | Ce que fait l'appli en attendant |
-|---|---|---|
-| Q1 | Un code stable dans le corps des 404 (par exemple `code` : `network`, `line`, `stop`, `route`), à côté du message | Elle reconnaît le message en toutes lettres ; reformulé, il redevient un 404 sans précision |
-| Q2 | Un délai relatif à côté de `nextAt` (comme `ageSec` l'est pour `fetchedAt`), pour ne pas dépendre de l'horloge du téléphone | Elle compare `nextAt` à sa propre horloge |
-| Q4 | Dans la réponse des passages, un indicateur explicite de réveil (par exemple `waking` : vrai), au lieu de le déduire de `fresh` et de `nextAt` | Elle prend pour un réveil toute réponse sans relevé récent dont le `nextAt` est à moins de 20 secondes, et borne ses retours à deux |
-| Q5 | `textColor` nul quand le réseau ne publie pas de couleur de texte, même s'il publie la couleur de la ligne | Hors Île-de-France, elle ne tient pas compte d'un texte noir |
-| Q6 | Quand Tracéo regroupera les quais d'un arrêt, l'arrêt regroupé aura-t-il un identifiant neuf, ou celui d'un des quais ? | Un widget posé sur un quai garde son identifiant : neuf, il demandera à être reconfiguré ; repris d'un quai, il recevra les deux sens sans rien dire |
-| Q7 | `indexAt` ne change-t-il que quand les horaires changent vraiment, ou à chaque compilation ? | Elle recharge lignes, arrêts et index à chaque changement de `indexAt` : s'il change chaque jour, un téléphone télécharge chaque jour l'index de son réseau |
-| Q8 | La date de dernière mise à jour du jeu de données d'un réseau, dans `attribution`, que demande la Licence Ouverte | Elle cite la date des horaires compilés par Tracéo (`indexAt`) |
-| Q9 | Le texte de `attribution.text` commencera-t-il toujours par « Contient des informations » ? | C'est à ce début qu'elle reconnaît la mention complète, pour ne pas la redire ; reformulée, la mention serait dite deux fois à l'écran des sources |
-| Q3 | Dans la réponse des arrêts d'une ligne, de quoi situer un arrêt : ses coordonnées (`lat`, `lon`), ou son rang sur la ligne | Pour distinguer deux arrêts de même nom, elle télécharge l'index entier du réseau |
+| | Question | Réponse de Tracéo | Dans l'appli |
+|---|---|---|---|
+| Q1 | Un code stable dans le corps des 404 | Fait : `code` vaut `network`, `line`, `stop` ou `route` ; le message ne change pas | Lu (lot 13) ; le message reste un repli |
+| Q2 | Un délai relatif à côté de `nextAt`, pour ne pas dépendre de l'horloge du téléphone | Proposé : `max-age` moins l'en-tête `Age` ; il faudrait porter le plafond de `max-age` de 60 secondes à la cadence | Pas nécessaire : pendant un réveil, `nextAt` moins l'en-tête `Date` (lot 13). Plafond laissé ; Tracéo s'engage par écrit sur `Date`, posé à l'envoi par la même horloge que `nextAt` |
+| Q3 | De quoi situer un arrêt dans la réponse des arrêts d'une ligne | Reporté : `lat` et `lon` du centre de la station, en ajout | Pour distinguer deux arrêts de même nom, elle télécharge l'index entier du réseau |
+| Q4 | Un indicateur explicite de réveil | Fait : `waking`, faux dès la fin du premier appel au flux, réussi ou non | Lu (lot 13) ; la déduction du lot 7 reste un repli |
+| Q5 | `textColor` nul quand le réseau ne publie pas de couleur de texte | Fait ; Tracéo demande si l'appli préfère `null` ou `#000000` | `null` : l'appli choisit le contraste (lot 13) |
+| Q6 | L'identifiant d'un arrêt regroupé | La zone publiée par le réseau si elle existe, sinon le plus petit quai du groupe ; `stop=` accepte aussi un quai de la station, ou une zone qu'elle a absorbée | Un widget posé sur un quai reçoit toute la station sans rien dire ; doublons retirés (lot 13) |
+| Q7 | `indexAt` change-t-il à chaque compilation ? | C'était le cas ; corrigé : il ne change qu'avec les lignes, les stations, l'index, l'emprise ou les modes. Pas encore observé sur plusieurs jours | Rien à changer |
+| Q8 | La date de mise à jour du jeu de données | Fait : `attribution.updatedAt`, ou `null` | Écran des sources (lot 13) |
+| Q9 | `attribution.text` commence-t-il toujours par « Contient des informations » ? | Garanti | Rien à changer |
+| Q10 | Le statut du réseau dans la réponse des passages, pour qu'un widget sache que le temps réel est interrompu sans relire le catalogue | Fait, en préproduction depuis le 20 novembre : `status`, `ok` ou `stale`, lu au moment de la réponse ; celui du dernier relevé pendant un réveil | Lu (lot 13) : « Temps réel interrompu sur ce réseau » |
+| Q11 | Une ligne qui n'est jamais dans le flux : `realtime` faux, et son mode retiré de `modes` si aucune de ses lignes n'a de temps réel | Fait, en préproduction depuis le 25 novembre : liste statique par réseau mesuré, datée au registre ; champ absent pour un réseau non mesuré | Lignes grisées à la configuration, gardées dans l'index, jamais classées par À proximité (lot 13) |
 
 ## 12. Proposition : rattacher un widget après un changement d'identifiants
 
@@ -443,3 +550,7 @@ dont l'identifiant a disparu alors que le code ou le nom demeure.
 **Recommandation.** Ne pas le coder maintenant. Demander à Tracéo ce comptage pendant un mois sur
 les réseaux qualifiés ; coder le lot si plus de quelques identifiants changent par mois dans un
 réseau, de préférence avec la liste des anciens identifiants.
+
+**20 novembre 2026.** Tracéo fait ce comptage depuis la brique MR1, à chaque compilation : lignes
+disparues, stations dont l'identifiant ne désigne plus rien, et celles dont l'identifiant désigne
+maintenant une autre station. Pas encore de chiffres : il faut une republication.

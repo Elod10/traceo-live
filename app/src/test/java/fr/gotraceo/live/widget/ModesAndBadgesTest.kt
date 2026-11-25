@@ -265,21 +265,27 @@ class ModesAndBadgesTest {
     }
 
     /**
-     * Le noir est la couleur de texte par défaut du GTFS : servi faute de mieux sur une couleur
-     * publiée, il ne doit pas l'emporter sur le blanc, plus lisible sur du bleu, du vert ou du rouge.
+     * Tracéo sert `null` quand le réseau publie la couleur d'une ligne sans sa couleur de texte
+     * (Saint-Étienne, Dijon) : l'application choisit alors le plus lisible du noir et du blanc. Un
+     * noir servi est un choix du réseau : il est gardé là où il se lit, comme en Île-de-France.
      */
     @Test
-    fun theDefaultBlackTextDoesNotWinOverWhite() {
+    fun anUnpublishedTextColourIsChosenAndAPublishedBlackIsKept() {
         for (color in listOf("0066CC", "008000", "E2001A", "7B4397")) {
-            val served = line("9", color = color, textColor = "000000")
-            assertNull(color, Palettes.publishedTextColor(served))
-            assertEquals(color, WHITE, Palettes.lineColors(served).second)
+            val unpublished = line("9", color = color, textColor = null)
+            assertNull(color, Palettes.publishedTextColor(unpublished))
+            assertEquals(color, WHITE, Palettes.lineColors(unpublished).second)
             // Le fond du thème « couleur de la ligne » reste la couleur de la ligne, sans être éclairci.
-            assertEquals(color, Palettes.parseColor(color), model(served, WidgetTheme.LINE).palette.background)
+            assertEquals(color, Palettes.parseColor(color), model(unpublished, WidgetTheme.LINE).palette.background)
         }
-        // Là où le noir était le bon choix, il revient de lui-même.
-        assertEquals(INK, Palettes.lineColors(line("9", color = "FFDD00", textColor = "000000")).second)
-        // En Île-de-France, le noir du référentiel est un choix : il est gardé.
+        assertEquals(INK, Palettes.lineColors(line("9", color = "FFDD00", textColor = null)).second)
+        // Le noir publié sur du jaune, comme à Brest ou à Troyes, est gardé tel quel.
+        val black = line("9", color = "FFDD00", textColor = "000000")
+        assertEquals(0xFF000000.toInt(), Palettes.publishedTextColor(black))
+        assertEquals(0xFF000000.toInt(), Palettes.lineColors(black).second)
+        // Illisible, il cède la place, comme toute couleur de texte publiée.
+        assertEquals(WHITE, Palettes.lineColors(line("9", color = "1A237E", textColor = "000000")).second)
+        // En Île-de-France, rien ne change.
         val idf = Line("C01371", "1", "1", "metro", color = "FFBE00", textColor = "000000")
         assertEquals(0xFF000000.toInt(), Palettes.publishedTextColor(idf))
         assertEquals(0xFF000000.toInt(), Palettes.lineColors(idf).second)

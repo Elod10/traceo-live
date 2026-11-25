@@ -41,6 +41,8 @@
     <string name="widget_short_reconfigure">À reconfigurer</string>
     <string name="widget_short_no_departure">Aucun passage</string>
     <string name="widget_short_error">Erreur</string>
+    <string name="widget_interrupted">Temps réel interrompu sur ce réseau pour le moment</string>
+    <string name="widget_short_interrupted">Sans temps réel</string>
     <string name="cd_line_badge">Ligne</string>
     <string name="theme_label">Couleur du widget</string>
     <string name="theme_auto">Automatique</string>

@@ -59,6 +59,8 @@ data class ProximityState(
     val wakeAt: Long? = null,
     /** Retours déjà faits à la suite pour ce réveil. */
     val wakeReturns: Int = 0,
+    /** Vrai si Tracéo disait le temps réel du réseau interrompu à la dernière réponse (cf. [WidgetStates.interrupted]). */
+    val interrupted: Boolean = false,
 ) {
     val isSnapshot: Boolean get() = fresh != null
 
@@ -71,6 +73,7 @@ data class ProximityState(
         .putOpt("fresh", fresh)
         .putOpt("wakeAt", wakeAt)
         .putOpt("wakeReturns", wakeReturns.takeIf { it > 0 })
+        .putOpt("interrupted", true.takeIf { interrupted })
 
     companion object {
         fun fromJson(o: JSONObject): ProximityState {
@@ -84,6 +87,7 @@ data class ProximityState(
                 fresh = if (o.has("fresh") && !o.isNull("fresh")) o.optBoolean("fresh") else null,
                 wakeAt = o.optLongOrNull("wakeAt"),
                 wakeReturns = o.optInt("wakeReturns"),
+                interrupted = o.optBoolean("interrupted"),
             )
         }
     }
@@ -130,9 +134,8 @@ object Proximity {
         val networkId = ranked.firstOrNull()?.nearby?.line?.networkId
         val returnsMade = RefreshSchedule.wakeReturnsMade(previous?.wakeAt, previous?.wakeReturns ?: 0, now)
         fun wakeOf(responses: List<PassageSnapshot>): Long? {
-            if (networkId == null || responses.isEmpty()) return null
-            val fresh = responses.mapNotNull { it.fresh }.takeIf { it.isNotEmpty() }?.all { it }
-            return RefreshSchedule.wakeAt(networkId, fresh, responses.mapNotNull { it.nextAt }.minOrNull(), now, returnsMade)
+            if (networkId == null) return null
+            return RefreshSchedule.wakeAt(networkId, responses, now, returnsMade)
         }
         val entries = ArrayList<ProximityEntry>()
         val snapshots = ArrayList<PassageSnapshot>()
@@ -180,6 +183,7 @@ object Proximity {
             fresh = snapshots.mapNotNull { it.fresh }.takeIf { it.isNotEmpty() }?.all { it },
             wakeAt = wakeAt,
             wakeReturns = if (wakeAt != null) returnsMade else 0,
+            interrupted = networkId != null && WidgetStates.interrupted(networkId, snapshots),
         )
     }
 

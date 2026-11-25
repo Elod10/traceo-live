@@ -55,5 +55,6 @@ object WidgetTexts {
         NoticeKind.NO_NETWORK -> context.getString(R.string.widget_no_network_title)
         NoticeKind.NO_DEPARTURE -> notice.detail ?: context.getString(R.string.widget_no_departure)
         NoticeKind.ERROR -> notice.detail ?: context.getString(R.string.notification_error)
+        NoticeKind.INTERRUPTED -> context.getString(R.string.widget_interrupted)
     }
 }

@@ -66,16 +66,12 @@ object Palettes {
     }
 
     /**
-     * La couleur de texte que le réseau publie pour sa ligne, ou null. Hors Île-de-France, le noir
-     * compte comme une absence : c'est la valeur par défaut du GTFS, que Tracéo sert quand le réseau
-     * ne dit rien, même pour une ligne dont il publie la couleur. Le garder mettrait du noir sur du
-     * bleu ou du rouge, où le blanc se lit mieux ; là où le noir était le bon choix, il est retrouvé
-     * par [onColor]. Sans couleur de ligne publiée, la couleur de texte ne dit rien de celle du mode.
+     * La couleur de texte que le réseau publie pour sa ligne, ou null. Tracéo sert `null` quand le
+     * réseau n'en publie pas, même pour une ligne dont il publie la couleur : [onColor] choisit alors
+     * le noir ou le blanc. Un noir servi est donc un choix du réseau, gardé s'il se lit. Sans couleur
+     * de ligne publiée, la couleur de texte ne dit rien de celle du mode.
      */
-    fun publishedTextColor(line: Line): Int? {
-        val text = parseColor(line.textColor) ?: return null
-        return text.takeIf { Networks.isIdfm(line.networkId) || it != BLACK }
-    }
+    fun publishedTextColor(line: Line): Int? = parseColor(line.textColor)
 
     /**
      * La couleur que le réseau publie pour sa ligne, ou null s'il n'en publie pas.

@@ -15,11 +15,13 @@ object NetworkMentions {
 
     /**
      * Paragraphe d'un réseau pour l'écran Sources et licences, en HTML : son nom, la mention que le
-     * catalogue demande d'afficher, la source et la licence avec leurs liens, et la date des horaires.
+     * catalogue demande d'afficher, la source et la licence avec leurs liens, et la date des données.
      *
-     * @param indexDate date de compilation des horaires, déjà mise en forme, ou null si elle est inconnue
+     * @param indexDate date du référentiel compilé par Tracéo, déjà mise en forme, ou null si elle est inconnue
+     * @param updatedDate date de la dernière mise à jour du jeu par son producteur
+     *        ([Attribution.updatedAt]), déjà mise en forme, ou null si elle est inconnue
      */
-    fun paragraph(network: Network, indexDate: String?): String {
+    fun paragraph(network: Network, indexDate: String?, updatedDate: String? = null): String {
         val lines = ArrayList<String>()
         lines += "<b>${escape(title(network))}</b>"
         val attribution = network.attribution
@@ -32,9 +34,12 @@ object NetworkMentions {
         } else {
             sentence(network).replaceFirstChar { it.uppercase() }
         }
-        // La Licence Ouverte demande la date des données réutilisées, l'ODbL de pouvoir retrouver
-        // la base : la date des horaires que Tracéo a compilés est celle que l'application connaît.
-        if (indexDate != null) lines += "Horaires compilés par Tracéo le ${escape(indexDate)}."
+        // La Licence Ouverte demande la date de la dernière mise à jour des données réutilisées : celle
+        // du jeu chez son producteur. À défaut, la date des horaires que Tracéo a compilés.
+        when {
+            updatedDate != null -> lines += "Jeu de données mis à jour le ${escape(updatedDate)}."
+            indexDate != null -> lines += "Horaires compilés par Tracéo le ${escape(indexDate)}."
+        }
         return lines.joinToString("<br>")
     }
 
