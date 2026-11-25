@@ -185,15 +185,15 @@ class Prefs(context: Context) {
         editor.apply()
     }
 
-    /** Lignes favorites du mode automatique. */
+    /** Lignes favorites du mode automatique, par leur clé ([Line.key]), qui porte le réseau hors Île-de-France. */
     val favoriteLines: Set<String>
         get() = settings.getStringSet(KEY_FAVORITE_LINES, null)?.toSet().orEmpty()
 
     /** Ajoute ou retire une ligne des favoris. Renvoie vrai si elle est maintenant favorite. */
-    fun toggleFavoriteLine(lineId: String): Boolean {
+    fun toggleFavoriteLine(lineKey: String): Boolean {
         val current = favoriteLines
-        val favorite = lineId !in current
-        val next = if (favorite) current + lineId else current - lineId
+        val favorite = lineKey !in current
+        val next = if (favorite) current + lineKey else current - lineKey
         settings.edit().putStringSet(KEY_FAVORITE_LINES, next).apply()
         return favorite
     }

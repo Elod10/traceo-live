@@ -69,8 +69,8 @@ class NearbyChoiceActivity : Activity() {
         // Le format À proximité affiche plusieurs lignes : aucune n'est « la » ligne affichée.
         val shownLineId = prefs.config(widgetId)?.line?.id.takeUnless { WidgetProviders.isProximity(this, widgetId) }
         adapter = NearbyAdapter(this, prefs.favoriteLines, shownLineId) { row ->
-            val favorite = prefs.toggleFavoriteLine(row.nearby.line.id)
-            adapter.setFavorite(row.nearby.line.id, favorite)
+            val favorite = prefs.toggleFavoriteLine(row.nearby.line.key)
+            adapter.setFavorite(row.nearby.line.key, favorite)
         }
         val list = findViewById<ListView>(R.id.nearby_list)
         list.adapter = adapter
@@ -173,8 +173,8 @@ class NearbyChoiceActivity : Activity() {
             notifyDataSetChanged()
         }
 
-        fun setFavorite(lineId: String, favorite: Boolean) {
-            if (favorite) favorites.add(lineId) else favorites.remove(lineId)
+        fun setFavorite(lineKey: String, favorite: Boolean) {
+            if (favorite) favorites.add(lineKey) else favorites.remove(lineKey)
             notifyDataSetChanged()
         }
 
@@ -203,7 +203,7 @@ class NearbyChoiceActivity : Activity() {
             wait.textSize = if (inMinutes) WAIT_TEXT_SP else WAIT_LABEL_SP
             view.findViewById<View>(R.id.nearby_unit).visibility = if (inMinutes) View.VISIBLE else View.GONE
 
-            val favorite = line.id in favorites
+            val favorite = line.key in favorites
             val star = view.findViewById<ImageButton>(R.id.nearby_star)
             star.setImageResource(if (favorite) R.drawable.ic_star else R.drawable.ic_star_border)
             star.contentDescription = context.getString(
