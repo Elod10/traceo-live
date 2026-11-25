@@ -152,7 +152,8 @@ data class Line(
  * Un arrêt d'une ligne. Les arrêts portant le même nom dans la même commune
  * (typiquement un quai par sens) sont regroupés : [stopIds] contient alors plusieurs
  * identifiants IDFM (« IDFM:463158 » ou « IDFM:monomodalStopPlace:58879 »). Hors Île-de-France,
- * c'est une zone d'arrêt du catalogue de Tracéo, à l'identifiant opaque.
+ * c'est un arrêt du réseau tel que Tracéo le sert, à l'identifiant opaque : un seul le plus souvent,
+ * plusieurs quand le réseau ne rattache pas les deux sens d'un arrêt (cf. [SameNameStops]).
  */
 data class Stop(
     val name: String,

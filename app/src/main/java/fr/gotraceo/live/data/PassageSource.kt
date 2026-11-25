@@ -283,11 +283,19 @@ object WidgetStates {
         // Le réseau se réveillait : le widget y revient à l'heure annoncée, un nombre borné de fois.
         val returnsMade = RefreshSchedule.wakeReturnsMade(previous?.wakeAt, previous?.wakeReturns ?: 0, now)
         val wakeAt = RefreshSchedule.wakeAt(config.networkId, fresh, snapshots.mapNotNull { it.nextAt }.minOrNull(), now, returnsMade)
+        // Hors Île-de-France, un arrêt peut réunir deux identifiants. Si le réseau n'en connaît plus
+        // qu'un, le widget ne montre plus qu'un sens : il le dit, même s'il lui reste des passages.
+        val gone = errors.firstOrNull { it is TraceoException && it.kind == TraceoException.Kind.NOT_FOUND }
+            .takeIf { !Networks.isIdfm(config.networkId) }
         return WidgetState(
             fetchedAt = now,
             attemptedAt = now,
             departures = filtered.take(MAX_STORED_DEPARTURES),
-            error = if (errors.isNotEmpty() && filtered.isEmpty()) errorMessage(errors.first()) else null,
+            error = when {
+                errors.isNotEmpty() && filtered.isEmpty() -> errorMessage(errors.first())
+                gone != null -> errorMessage(gone)
+                else -> null
+            },
             // Plusieurs relevés : on annonce le plus ancien, et « récent » seulement si tous le sont.
             dataAt = snapshots.mapNotNull { it.dataAt }.minOrNull(),
             fresh = fresh,

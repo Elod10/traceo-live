@@ -291,6 +291,41 @@ enregistrées conformes au chapitre 5.
   Île-de-France, l'appli ne tient donc pas compte d'un texte noir : elle choisit elle-même entre le
   noir et le blanc, ce qui redonne le noir là où il était le bon choix (question Q5).
 
+### Lot 10 : arrêts
+
+- **Sans commune.** La liste des arrêts d'une ligne n'affiche que leur nom, sans sous-titre vide,
+  et se cherche par ce nom (« Rechercher un arrêt »). Rien d'autre ne dépendait de la commune hors
+  Île-de-France.
+- **Deux arrêts de même nom sur une ligne.** Sans commune, rien ne les sépare dans la liste. Ce
+  sont soit les deux sens d'un même arrêt, que le réseau ne rattache pas l'un à l'autre (le cas que
+  Tracéo doit regrouper, chapitre 5), soit deux endroits différents (« Mairie » dans deux
+  communes). Leur position tranche, lue dans l'index du réseau :
+  - à 200 m ou moins l'un de l'autre, de proche en proche, ils ne font qu'un arrêt, qui porte
+    leurs identifiants : le widget les interroge tous, et le sens se choisit à l'étape suivante,
+    comme en Île-de-France ;
+  - plus loin, ils restent deux, chacun avec l'arrêt voisin de la ligne qui le situe : « Près de
+    Jean Jaurès ». Le voisin doit avoir un nom unique sur la ligne, être à 800 m au plus, et plus
+    près de cet arrêt que de son homonyme ;
+  - si l'index manque, ou si aucun voisin ne les départage, ils restent deux et sont numérotés :
+    « Arrêt 1 sur 2 de ce nom ».
+  La liste se présente ainsi avant et après le regroupement demandé au serveur : après, il ne
+  restera que le second cas.
+- **Widgets déjà posés.** Un widget posé sur un seul sens retrouve ses sens cochés quand on rouvre
+  sa configuration sur l'arrêt qui réunit maintenant les deux. Si le réseau ne connaît plus l'un
+  des identifiants d'un arrêt réuni, le widget le dit, même s'il lui reste des passages de l'autre.
+  Ce que deviendra un widget posé quand Tracéo regroupera lui-même les quais dépend des
+  identifiants qu'il donnera aux arrêts regroupés (question Q6).
+- **L'index à la configuration.** Jusqu'ici, l'index d'un réseau n'était demandé que par un widget
+  qui suit la position. Il l'est maintenant aussi à la configuration d'un widget fixe, mais
+  seulement quand la ligne choisie a deux arrêts de même nom, et s'il manque sur le téléphone ou
+  s'il y est périmé. La liste s'affiche sans l'attendre, puis se redessine. Tracéo apprend alors
+  qu'un téléphone s'intéresse à ce réseau, ce que la politique de confidentialité devra dire pour
+  la 3.0 : elle écrit aujourd'hui que seuls les widgets qui suivent la position téléchargent
+  l'index.
+- **Limite.** Le mode automatique et le format À proximité prennent, dans un réseau qui ne rattache
+  pas ses quais, le quai le plus proche : donc un seul sens, selon le trottoir où l'on se tient,
+  tant que Tracéo ne regroupe pas les quais (chapitre 5).
+
 ## 11. Questions à Tracéo
 
 Ce qui manque à l'appli dans le contrat, et qu'elle ne contourne qu'en attendant une réponse.
@@ -301,3 +336,5 @@ Ce qui manque à l'appli dans le contrat, et qu'elle ne contourne qu'en attendan
 | Q2 | Un délai relatif à côté de `nextAt` (comme `ageSec` l'est pour `fetchedAt`), pour ne pas dépendre de l'horloge du téléphone | Elle compare `nextAt` à sa propre horloge |
 | Q4 | Dans la réponse des passages, un indicateur explicite de réveil (par exemple `waking` : vrai), au lieu de le déduire de `fresh` et de `nextAt` | Elle prend pour un réveil toute réponse sans relevé récent dont le `nextAt` est à moins de 20 secondes, et borne ses retours à deux |
 | Q5 | `textColor` nul quand le réseau ne publie pas de couleur de texte, même s'il publie la couleur de la ligne | Hors Île-de-France, elle ne tient pas compte d'un texte noir |
+| Q6 | Quand Tracéo regroupera les quais d'un arrêt, l'arrêt regroupé aura-t-il un identifiant neuf, ou celui d'un des quais ? | Un widget posé sur un quai garde son identifiant : neuf, il demandera à être reconfiguré ; repris d'un quai, il recevra les deux sens sans rien dire |
+| Q3 | Dans la réponse des arrêts d'une ligne, de quoi situer un arrêt : ses coordonnées (`lat`, `lon`), ou son rang sur la ligne | Pour distinguer deux arrêts de même nom, elle télécharge l'index entier du réseau |

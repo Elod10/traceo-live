@@ -200,6 +200,21 @@ object StopIndexFile {
      */
     @Throws(IOException::class)
     fun around(input: InputStream, lat: Double, lon: Double, radiusM: Int, networkId: String = Networks.IDFM): StopIndexArea {
+        val dLat = radiusM / METERS_PER_DEGREE
+        val dLon = radiusM / (METERS_PER_DEGREE * cos(Math.toRadians(lat)).coerceAtLeast(0.01))
+        val minLat = ((lat - dLat) * COORD_SCALE).toInt()
+        val maxLat = ((lat + dLat) * COORD_SCALE).toInt()
+        val minLon = ((lon - dLon) * COORD_SCALE).toInt()
+        val maxLon = ((lon + dLon) * COORD_SCALE).toInt()
+        return read(input, networkId) { stopLat, stopLon -> stopLat in minLat..maxLat && stopLon in minLon..maxLon }
+    }
+
+    /** Tous les arrêts du fichier : pour situer les arrêts d'une ligne, pas pour chercher autour d'un point. */
+    @Throws(IOException::class)
+    fun all(input: InputStream, networkId: String = Networks.IDFM): StopIndexArea = read(input, networkId) { _, _ -> true }
+
+    /** @param wanted vrai pour un arrêt à garder, d'après sa latitude et sa longitude entières */
+    private inline fun read(input: InputStream, networkId: String, wanted: (Int, Int) -> Boolean): StopIndexArea {
         val data = DataInputStream(BufferedInputStream(input))
         if (data.readInt() != MAGIC || data.readInt() != VERSION) throw IOException("Index d'arrêts illisible")
         data.readLong()
@@ -222,20 +237,13 @@ object StopIndexFile {
                 ),
             )
         }
-        val dLat = radiusM / METERS_PER_DEGREE
-        val dLon = radiusM / (METERS_PER_DEGREE * cos(Math.toRadians(lat)).coerceAtLeast(0.01))
-        val minLat = ((lat - dLat) * COORD_SCALE).toInt()
-        val maxLat = ((lat + dLat) * COORD_SCALE).toInt()
-        val minLon = ((lon - dLon) * COORD_SCALE).toInt()
-        val maxLon = ((lon + dLon) * COORD_SCALE).toInt()
-
         val stops = ArrayList<IndexedStop>()
         val usedLines = HashMap<String, Line>()
         repeat(data.readInt()) {
             val stopLat = data.readInt()
             val stopLon = data.readInt()
             val size = data.readUnsignedShort()
-            if (stopLat !in minLat..maxLat || stopLon !in minLon..maxLon) {
+            if (!wanted(stopLat, stopLon)) {
                 skipFully(data, size)
                 return@repeat
             }
@@ -312,6 +320,17 @@ class StopIndexStore(
         if (Networks.isIdfm(networkId)) downloadOpenData(now) else downloadFromTraceo(now, indexAt)
 
     /**
+     * Recharge l'index d'un réseau du catalogue s'il est périmé ; vrai s'il a été rechargé. Le
+     * contrôle se refait une fois le verrou pris : un autre fil a pu le recharger entre-temps.
+     */
+    @Throws(IOException::class)
+    fun downloadIfOutdated(indexAt: Long?, now: Long = System.currentTimeMillis()): Boolean = synchronized(LOCK) {
+        if (!isOutdated(indexAt)) return false
+        download(now, indexAt)
+        true
+    }
+
+    /**
      * L'index d'un autre réseau, compilé par Tracéo : il est daté de ses horaires, pas du téléchargement.
      * Il n'est jamais daté d'avant ce que le catalogue annonçait en le demandant : si les deux dates
      * de Tracéo s'écartent un peu, l'index ne doit pas paraître périmé, et être retéléchargé, à chaque fois.
@@ -369,6 +388,16 @@ class StopIndexStore(
 
     private fun saveTo(target: File, url: String) {
         Http.stream(url) { input -> target.outputStream().use { input.copyTo(it) } }
+    }
+
+    /** Tous les arrêts de l'index, ou null s'il n'existe pas encore ou ne se lit plus. */
+    fun all(): StopIndexArea? {
+        if (!file.exists()) return null
+        return try {
+            file.inputStream().use { StopIndexFile.all(it, networkId) }
+        } catch (e: IOException) {
+            null
+        }
     }
 
     /** Arrêts autour du point, ou null si l'index n'existe pas encore ou ne se lit plus. */
