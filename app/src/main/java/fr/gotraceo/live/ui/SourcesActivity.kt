@@ -7,6 +7,7 @@ import android.text.method.LinkMovementMethod
 import android.view.View
 import android.widget.TextView
 import fr.gotraceo.live.R
+import fr.gotraceo.live.data.NetworkChoices
 import fr.gotraceo.live.data.NetworkMentions
 import fr.gotraceo.live.data.Networks
 import fr.gotraceo.live.data.Prefs
@@ -60,14 +61,16 @@ class SourcesActivity : Activity() {
     /** Une entrée par réseau utilisé hors Île-de-France, et ces réseaux nommés là où l'application dit ne dépendre de personne. */
     private fun showNetworks() {
         val catalog = Sources.catalog(this).read()
+        // Par ville, comme à la configuration : avec plusieurs réseaux, on y cherche le sien.
         val networks = Sources.usedNetworks(this)
             .filter { !Networks.isIdfm(it) }
             .map { Mentions.network(catalog.byId(it), it) }
+            .sortedWith(NetworkChoices.byCity)
         if (networks.isEmpty()) return
 
         findViewById<TextView>(R.id.not_affiliated).text = getString(
             R.string.sources_not_affiliated_networks,
-            networks.joinToString(" ; ") { NetworkMentions.publisher(it) },
+            networks.map { NetworkMentions.publisher(it) }.distinct().joinToString(" ; "),
         )
         val dates = DateFormat.getDateInstance(DateFormat.LONG, Locale.FRENCH)
         val paragraphs = networks.joinToString("<br><br>") { network ->

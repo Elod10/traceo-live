@@ -363,6 +363,31 @@ enregistrées conformes au chapitre 5.
   réseaux couverts, mais le plus proche et sa distance (« Le plus proche : Troyes, à 35,0 km »).
   La distance est celle du bord de l'emprise du réseau, pas du centre de la ville.
 
+### Lot 12 : mentions à plusieurs réseaux
+
+- **La licence vient du catalogue.** Chaque réseau est cité avec le nom et le lien de sa source et
+  de sa licence, tels que `attribution` les donne : l'appli n'écrit le nom d'aucune licence.
+  « Licence Ouverte » porte déjà le mot : la mention dit « aux conditions de la Licence Ouverte
+  2.0 », et garde pour l'ODbL la formule de sa section 4.3, « aux conditions de la licence ODbL ».
+- **Écran Sources et licences.** Un paragraphe par réseau des widgets posés, rangés par ville.
+  Quand Tracéo sert la mention complète du réseau (« Contient des informations du jeu… »), l'écran
+  ne la redit pas avec d'autres mots : il la fait suivre de « Source : … Licence : … », avec leurs
+  liens, puis de la date des horaires compilés. La Licence Ouverte demande la date de mise à jour
+  des données réutilisées : l'appli n'a que celle de la compilation par Tracéo, et le dit ainsi
+  (question Q8).
+- **Mention du bas des écrans.** Un seul autre réseau : sa mention entière, comme au pilote.
+  Plusieurs : une phrase pour tous, rangés par ville, « Autres réseaux : contient des informations
+  des réseaux TBM (Licence Ouverte 2.0) et TCAT (ODbL), relevées par Tracéo. Détail dans Sources et
+  licences. », chaque nom de réseau lié à sa source et chaque licence à son texte. Sans widget en
+  Île-de-France, elle commence par « Contient ». Au-delà de cinq réseaux, elle nomme les quatre
+  premiers et compte les autres, que l'écran des sources cite tous. La mention de l'Île-de-France
+  ne change pas.
+- **Réseaux cités.** Ceux des widgets posés ; un widget À proximité compte aussi pour le réseau
+  dont il montre les lignes, s'il n'est pas encore celui de sa configuration. L'écran des sources
+  ne nomme chaque éditeur qu'une fois.
+- **Accords.** « d'Irigo », « de TBM » ; le mot « licence » n'est pas répété, où qu'il soit dans le
+  nom de la licence.
+
 ## 11. Questions à Tracéo
 
 Ce qui manque à l'appli dans le contrat, et qu'elle ne contourne qu'en attendant une réponse.
@@ -375,4 +400,46 @@ Ce qui manque à l'appli dans le contrat, et qu'elle ne contourne qu'en attendan
 | Q5 | `textColor` nul quand le réseau ne publie pas de couleur de texte, même s'il publie la couleur de la ligne | Hors Île-de-France, elle ne tient pas compte d'un texte noir |
 | Q6 | Quand Tracéo regroupera les quais d'un arrêt, l'arrêt regroupé aura-t-il un identifiant neuf, ou celui d'un des quais ? | Un widget posé sur un quai garde son identifiant : neuf, il demandera à être reconfiguré ; repris d'un quai, il recevra les deux sens sans rien dire |
 | Q7 | `indexAt` ne change-t-il que quand les horaires changent vraiment, ou à chaque compilation ? | Elle recharge lignes, arrêts et index à chaque changement de `indexAt` : s'il change chaque jour, un téléphone télécharge chaque jour l'index de son réseau |
+| Q8 | La date de dernière mise à jour du jeu de données d'un réseau, dans `attribution`, que demande la Licence Ouverte | Elle cite la date des horaires compilés par Tracéo (`indexAt`) |
+| Q9 | Le texte de `attribution.text` commencera-t-il toujours par « Contient des informations » ? | C'est à ce début qu'elle reconnaît la mention complète, pour ne pas la redire ; reformulée, la mention serait dite deux fois à l'écran des sources |
 | Q3 | Dans la réponse des arrêts d'une ligne, de quoi situer un arrêt : ses coordonnées (`lat`, `lon`), ou son rang sur la ligne | Pour distinguer deux arrêts de même nom, elle télécharge l'index entier du réseau |
+
+## 12. Proposition : rattacher un widget après un changement d'identifiants
+
+Point « À étudier » du chapitre 6 (R5). Rien n'est codé : c'est une proposition, à trancher.
+
+**Le problème.** Un réseau qui republie ses horaires peut changer les identifiants de ses lignes et
+de ses arrêts. Le widget reçoit alors un 404, se vide et demande à être reconfiguré. Depuis le lot 7
+il sait lequel manque : la ligne, ou l'arrêt sur cette ligne.
+
+**Ce que l'appli a pour s'y rattacher seule** : le code de la ligne, son nom et son mode ; le nom de
+l'arrêt ; les sens cochés, par destination.
+
+**Ce qu'elle ferait.** Sur un 404 « ligne » ou « arrêt » hors Île-de-France, une seule fois par
+publication d'horaires (`indexAt`) : redemander les lignes du réseau, y chercher la ligne de même
+code et de même mode ; redemander ses arrêts, y chercher l'arrêt de même nom ; réécrire la
+configuration du widget et l'actualiser. Elle ne se rattache que si chaque recherche donne une
+réponse et une seule ; sinon elle demande à être reconfigurée, comme aujourd'hui. Un widget qui suit
+la position n'en a pas besoin : il rechoisit sa ligne à la prochaine position.
+
+| | |
+|---|---|
+| Code de l'appli | Environ 150 lignes sans Android (la recherche, testable seule), 60 dans l'actualisation (déclenchement, garde, écriture sous verrou) |
+| Tests | Environ 200 lignes, une quinzaine de cas : code réutilisé par une autre ligne, deux arrêts de même nom, arrêt renommé, sens disparu, réseau renommé |
+| Requêtes | Deux par widget rompu et par publication (lignes, puis arrêts de la ligne) ; aucune en temps normal. Sous la limite de 30 par minute, sauf dizaines de widgets rompus à la fois |
+| Travail | Un lot, une PR : de l'ordre d'une session comme celle d'un des lots 7 à 12, relecture comprise |
+| Côté Tracéo | Rien d'obligatoire. Utile : le code stable des 404 (Q1) ; mieux, la liste des anciens identifiants d'une ligne ou d'un arrêt, qui rendrait le rattachement certain au lieu de probable |
+
+**Les risques.** Se rattacher à tort : un code repris par une autre ligne après une refonte du
+réseau, un arrêt renommé dont le nom est celui d'un autre. Le widget montrerait alors, sans rien
+dire, les passages d'une autre ligne. L'unicité exigée et le mode identique réduisent ce risque sans
+l'annuler. Et le cas ne se produit qu'à une vraie republication : il ne s'essaie pas sur demande.
+
+**Ce qui manque pour décider : la fréquence.** Personne n'a compté combien d'identifiants changent
+d'une publication à l'autre dans ces réseaux. Si c'est rare, demander de reconfigurer suffit. Tracéo
+peut le mesurer sans rien servir de plus : à chaque compilation, compter les lignes et les arrêts
+dont l'identifiant a disparu alors que le code ou le nom demeure.
+
+**Recommandation.** Ne pas le coder maintenant. Demander à Tracéo ce comptage pendant un mois sur
+les réseaux qualifiés ; coder le lot si plus de quelques identifiants changent par mois dans un
+réseau, de préférence avec la liste des anciens identifiants.

@@ -28,13 +28,14 @@ object Mentions {
         val ids = networkIds.distinct().ifEmpty { listOf(Networks.IDFM) }
         val catalog = Sources.catalog(context).read()
         val text = SpannableStringBuilder()
-        ids.forEach { id ->
+        val idfm = ids.any(Networks::isIdfm)
+        if (idfm) text.append(context.getText(R.string.data_mention))
+        // Les autres réseaux par ville, comme partout ailleurs. Un seul garde sa mention entière ;
+        // plusieurs tiennent en une phrase, qui renvoie à l'écran des sources pour le détail.
+        val others = ids.filter { !Networks.isIdfm(it) }.map { network(catalog.byId(it), it) }
+        NetworkMentions.others(others, afterIdf = idfm)?.let { mention ->
             if (text.isNotEmpty()) text.append("\n")
-            if (Networks.isIdfm(id)) {
-                text.append(context.getText(R.string.data_mention))
-            } else {
-                text.append(html(NetworkMentions.short(network(catalog.byId(id), id))))
-            }
+            text.append(html(mention))
         }
         return text
     }

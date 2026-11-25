@@ -29,7 +29,11 @@ object Sources {
      */
     fun usedNetworks(context: Context): List<String> {
         val prefs = Prefs(context)
-        val ids = WidgetUpdater.widgetIds(context).asList().mapNotNull { prefs.config(it)?.networkId }.distinct()
+        // Un widget À proximité montre les lignes du réseau où il a été lu en dernier, qui peut
+        // n'être pas encore celui de sa configuration : les deux sont cités.
+        val ids = WidgetUpdater.widgetIds(context).asList().flatMap { id ->
+            listOfNotNull(prefs.config(id)?.networkId, prefs.proximity(id)?.entries?.firstOrNull()?.nearby?.line?.networkId)
+        }.distinct()
         return ids.sortedBy { if (Networks.isIdfm(it)) 0 else 1 }
     }
 
