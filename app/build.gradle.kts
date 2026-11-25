@@ -38,8 +38,8 @@ android {
         applicationId = "fr.gotraceo.live"
         minSdk = 26
         targetSdk = 36
-        versionCode = 20
-        versionName = "2.0.4"
+        versionCode = 22
+        versionName = "2.0.6"
         buildConfigField("String", "TRACEO_URL", "\"$traceoProductionUrl\"")
     }
 

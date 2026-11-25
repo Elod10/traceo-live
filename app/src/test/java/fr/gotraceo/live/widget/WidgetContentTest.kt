@@ -686,6 +686,19 @@ class WidgetContentTest {
     }
 
     @Test
+    fun screenReadersHearThePlatform() {
+        val result = model(
+            config(transilien, mapOf("IDFM:1" to emptySet())),
+            state(dep("Paris Nord", 4, platform = "2A")),
+        )
+        assertEquals(
+            "Ligne P, Bastille. Vers Paris Nord : 4 minutes, voie 2A. " +
+                "Données PRIM, mises à jour à ${DepartureFormat.clock(now - 60_000L)}.",
+            WidgetContent.describe(result),
+        )
+    }
+
+    @Test
     fun aNewWidgetStartsInTheLineColorExceptTheList() {
         assertEquals(WidgetTheme.LINE, WidgetFormat.defaultTheme(null))
         WidgetFormat.entries.filter { it != WidgetFormat.LISTE }.forEach {

@@ -154,11 +154,14 @@ object Referential {
 
     // --- Utilitaires ---------------------------------------------------------------------
 
+    private val HEX_COLOR = Regex("[0-9A-Fa-f]{6}")
+    private val NATURAL_TOKENS = Regex("\\d+|\\D+")
+
     fun bareLineId(id: String): String = id.trim().trimEnd(':').substringAfterLast(':')
 
     fun cleanColor(c: String): String? {
         val hex = c.trim().removePrefix("#")
-        return if (hex.matches(Regex("[0-9A-Fa-f]{6}"))) hex.uppercase(Locale.ROOT) else null
+        return if (HEX_COLOR.matches(hex)) hex.uppercase(Locale.ROOT) else null
     }
 
     private fun JSONObject.str(key: String): String? {
@@ -199,5 +202,5 @@ object Referential {
     }
 
     private fun tokenize(s: String): List<String> =
-        Regex("\\d+|\\D+").findAll(s.trim()).map { it.value.trim() }.filter { it.isNotEmpty() }.toList()
+        NATURAL_TOKENS.findAll(s.trim()).map { it.value.trim() }.filter { it.isNotEmpty() }.toList()
 }
