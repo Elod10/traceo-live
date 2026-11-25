@@ -374,10 +374,36 @@ class TraceoNetworksTest {
         assertTrue(server.requests.none { it.headers.containsKey("apikey") })
     }
 
+    /** Un Tracéo d'avant les réseaux répond 404 : il n'y a que l'Île-de-France, et ce n'est pas une panne. */
     @Test
-    fun aMissingCatalogIsAnIoErrorSoThePhoneKeepsItsOwn() {
+    fun aServerWithoutTheCatalogRouteHasNoOtherNetwork() {
         server.respond(CATALOG_PATH, 404, """{"error": "Route inconnue."}""")
         val store = NetworkCatalogStore(storeFile()) { client().networks() }
-        assertEquals(listOf(Networks.IDFM), store.fresh(now = NetworkCatalogStore.MAX_AGE_MS).networks.map { it.id })
+        val now = 3 * NetworkCatalogStore.MAX_AGE_MS
+        val catalog = store.refresh(now)
+        assertEquals(listOf(Networks.IDFM), catalog.networks.map { it.id })
+        assertEquals(now, catalog.savedAt)
+        assertFalse(store.isStale(now + 1_000L))
+    }
+
+    /** Après avoir donné des réseaux, un 404 est une panne : le téléphone garde ce qu'il sait. */
+    @Test
+    fun aCatalogRouteThatDisappearsDoesNotEraseTheKnownNetworks() {
+        server.respond(CATALOG_PATH, 200, CATALOG)
+        server.respond(CATALOG_PATH, 404, """{"error": "Route inconnue."}""")
+        val store = NetworkCatalogStore(storeFile()) { client().networks() }
+        store.refresh(now = 1_000_000L)
+        expectKind(TraceoException.Kind.NOT_FOUND) { store.refresh(now = 2_000_000L) }
+        assertEquals(listOf(Networks.IDFM, TCAT), store.read().networks.map { it.id })
+        assertEquals(1_000_000L, store.read().savedAt)
+    }
+
+    @Test
+    fun anUnreachableCatalogIsAnIoErrorSoThePhoneKeepsItsOwn() {
+        server.respond(CATALOG_PATH, 503, """{"error": "Indisponible."}""")
+        val store = NetworkCatalogStore(storeFile()) { client().networks() }
+        val catalog = store.fresh(now = NetworkCatalogStore.MAX_AGE_MS)
+        assertEquals(listOf(Networks.IDFM), catalog.networks.map { it.id })
+        assertEquals("Jamais reçu : il reste à redemander", 0L, catalog.savedAt)
     }
 }

@@ -41,7 +41,7 @@ object WidgetTexts {
         NoticeKind.NOT_CONFIGURED -> null
         NoticeKind.RECONFIGURE -> context.getString(R.string.widget_reconfigure_title)
         NoticeKind.LOADING -> context.getString(R.string.widget_loading)
-        NoticeKind.NO_DEPARTURE -> context.getString(R.string.widget_no_departure)
+        NoticeKind.NO_DEPARTURE -> notice.detail ?: context.getString(R.string.widget_no_departure)
         NoticeKind.ERROR -> notice.detail ?: context.getString(R.string.notification_error)
     }
 }

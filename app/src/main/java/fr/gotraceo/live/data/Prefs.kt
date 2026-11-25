@@ -76,6 +76,11 @@ class Prefs(context: Context) {
             return drawn
         }
 
+    /** Réseau du dernier widget enregistré : il est proposé d'avance au suivant. Null si aucun. */
+    var lastNetwork: String?
+        get() = settings.getString(KEY_LAST_NETWORK, null)
+        set(value) = settings.edit().putString(KEY_LAST_NETWORK, value).apply()
+
     /** Intervalle d'actualisation automatique en minutes (0 = manuel uniquement). */
     var refreshMinutes: Int
         get() = offeredRefresh(settings.getInt(KEY_REFRESH, DEFAULT_REFRESH_MINUTES))
@@ -262,6 +267,7 @@ class Prefs(context: Context) {
         private const val KEY_TILE_ADDED = "tile_added"
         private const val KEY_PRIM_USAGE = "prim_usage"
         private const val KEY_REFRESH_OFFSET = "refresh_offset_ms"
+        private const val KEY_LAST_NETWORK = "last_network"
         private val usageLock = Any()
         const val DEFAULT_REFRESH_MINUTES = 2
         val REFRESH_CHOICES = listOf(0, 1, 2, 5, 10)

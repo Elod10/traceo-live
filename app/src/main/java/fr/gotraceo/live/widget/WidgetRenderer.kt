@@ -192,7 +192,8 @@ object WidgetRenderer {
             NoticeKind.RECONFIGURE ->
                 context.getString(R.string.widget_reconfigure_title) + ". " + context.getString(R.string.widget_reconfigure_body)
             NoticeKind.LOADING -> context.getString(R.string.widget_loading)
-            NoticeKind.NO_DEPARTURE -> model.stopName + ". " + context.getString(R.string.widget_no_departure)
+            NoticeKind.NO_DEPARTURE ->
+                model.stopName + ". " + (notice.detail ?: context.getString(R.string.widget_no_departure))
             NoticeKind.ERROR -> model.stopName + ". " + notice.detail.orEmpty()
         }
     }

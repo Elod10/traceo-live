@@ -320,6 +320,6 @@ class StopIndexStore(private val file: File) {
         private const val REFRESH_UNMETERED_MS = 7 * DAY_MS
         private const val REFRESH_METERED_MS = 30 * DAY_MS
 
-        val ALL_MODES: List<String> = TransportMode.entries.flatMap { it.apiModes }.distinct()
+        val ALL_MODES: List<String> = TransportMode.IDFM.flatMap { it.apiModes }.distinct()
     }
 }

@@ -792,7 +792,12 @@ private class Scene(
         val body = when (notice.kind) {
             NoticeKind.NOT_CONFIGURED -> if (small) R.string.widget_short_not_configured else R.string.widget_tap_to_configure
             NoticeKind.RECONFIGURE -> if (small) R.string.widget_short_reconfigure else R.string.widget_reconfigure_body
-            NoticeKind.NO_DEPARTURE -> if (small) R.string.widget_short_no_departure else R.string.widget_no_departure
+            NoticeKind.NO_DEPARTURE -> when {
+                small -> R.string.widget_short_no_departure
+                // La raison est connue (ligne sans temps réel) : elle remplace le message habituel.
+                notice.detail != null -> null
+                else -> R.string.widget_no_departure
+            }
             else -> if (small) R.string.widget_short_error else null
         }?.let { context.getString(it) } ?: notice.detail.orEmpty()
         val size = if (small) 12.5f else 14.5f

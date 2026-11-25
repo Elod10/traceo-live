@@ -38,7 +38,11 @@ import fr.gotraceo.live.data.AnchorPolicy
 import fr.gotraceo.live.data.DataSources
 import fr.gotraceo.live.data.DirectionOption
 import fr.gotraceo.live.data.Directions
+import fr.gotraceo.live.data.GeoPoint
 import fr.gotraceo.live.data.Line
+import fr.gotraceo.live.data.Network
+import fr.gotraceo.live.data.NetworkCatalog
+import fr.gotraceo.live.data.NetworkStatus
 import fr.gotraceo.live.data.Networks
 import fr.gotraceo.live.data.PassageRoute
 import fr.gotraceo.live.data.PassageSnapshot
@@ -74,13 +78,16 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.IOException
 import java.lang.ref.WeakReference
+import java.text.Collator
+import java.util.Locale
 import kotlin.math.min
 import kotlin.math.roundToInt
 
 /**
  * Assistant de configuration d'un widget :
- * mode de transport → ligne → arrêt → sens et couleur, ou le mode automatique, qui suit la
- * position : ligne proche → couleur.
+ * réseau → mode de transport → ligne → arrêt → sens et couleur, ou le mode automatique, qui suit la
+ * position : ligne proche → couleur. L'étape du réseau n'existe que s'il y en a un autre que
+ * l'Île-de-France à proposer.
  */
 class ConfigureActivity : Activity() {
 
@@ -91,7 +98,11 @@ class ConfigureActivity : Activity() {
         const val EXTRA_FROM_PIN = "fr.gotraceo.live.extra.FROM_PIN"
 
         private const val REQUEST_LOCATION = 1
+        private const val REQUEST_NETWORK_LOCATION = 2
         private const val AUTO_ROWS_SHOWN = 30
+
+        /** À la configuration, le catalogue est redemandé s'il a plus que cet âge : la liste doit être à jour. */
+        private const val CATALOG_MAX_AGE_MS = 10L * 60 * 1000
 
         /** Une grille n'a de sens que pour quelques lignes au nom très court, comme le métro. */
         private const val GRID_MAX_LINES = 40
@@ -110,7 +121,7 @@ class ConfigureActivity : Activity() {
         fun isOpen(widgetId: Int): Boolean = openScreens[widgetId]?.get()?.let { !it.isFinishing && it.started } == true
     }
 
-    private enum class Step { MODE, LINE, STOP, DIRECTION, AUTO, AUTO_COLOR }
+    private enum class Step { NETWORK, MODE, LINE, STOP, DIRECTION, AUTO, AUTO_COLOR }
 
     /** Marqueur de l'option « Tous les sens ». */
     private object AllDirections
@@ -120,6 +131,9 @@ class ConfigureActivity : Activity() {
 
     /** Marqueur de la ligne qui mène à la clé API. */
     private object KeyRow
+
+    /** Marqueur de la ligne « Trouver mon réseau ». */
+    private object FindNetworkRow
 
     private val scope = MainScope()
     private var loadJob: Job? = null
@@ -132,6 +146,30 @@ class ConfigureActivity : Activity() {
     private var widgetId = AppWidgetManager.INVALID_APPWIDGET_ID
     private var existing: WidgetConfig? = null
     private var step = Step.MODE
+
+    /** Les réseaux connus du téléphone, redemandés à Tracéo pendant l'étape du réseau. */
+    private var catalog = NetworkCatalog()
+
+    /** Le réseau du widget en cours de configuration. */
+    private var network: Network = Networks.ILE_DE_FRANCE
+    private var catalogJob: Job? = null
+    private var locateJob: Job? = null
+
+    /** Vrai tant que le catalogue est redemandé à Tracéo. */
+    private var catalogLoading = false
+
+    /** Vrai si Tracéo n'a pas donné le catalogue : la liste est peut-être incomplète. */
+    private var catalogFailed = false
+
+    /** Dernière position approximative lue à l'étape du réseau, et le réseau qui la dessert. */
+    private var networkPoint: GeoPoint? = null
+    private var nearestNetwork: String? = null
+
+    /** Vrai dès que l'usager a touché un réseau : la position ne déplace plus son choix. */
+    private var networkTouched = false
+
+    /** Message de l'étape du réseau, à la place de son aide. */
+    private var networkNotice: Int? = null
     private var mode: TransportMode? = null
     private var line: Line? = null
     private var stop: Stop? = null
@@ -224,6 +262,11 @@ class ConfigureActivity : Activity() {
         repository = ReferentialRepository(this)
         existing = prefs.config(widgetId)
         selectedTheme = ThemeChoices.initial(existing?.theme, chosenFormat)
+        catalog = Sources.catalog(this).read()
+        // Le réseau du widget à modifier, sinon le dernier choisi : l'étape se franchit alors d'un toucher.
+        network = existing?.let { cfg -> catalog.byId(cfg.networkId) ?: Networks.placeholder(cfg.networkId, cfg.line.mode) }
+            ?: prefs.lastNetwork?.let(catalog::byId)?.takeIf { it.status != NetworkStatus.OFF }
+            ?: Networks.ILE_DE_FRANCE
 
         bindViews()
         adapter = RowAdapter(this)
@@ -248,6 +291,7 @@ class ConfigureActivity : Activity() {
         }
         save.setOnClickListener {
             when (step) {
+                Step.NETWORK -> confirmNetwork()
                 Step.AUTO -> goTo(Step.AUTO_COLOR)
                 Step.AUTO_COLOR -> saveAutoConfig()
                 else -> saveConfig()
@@ -255,8 +299,24 @@ class ConfigureActivity : Activity() {
         }
         findViewById<View>(R.id.back).setOnClickListener { navigateBack() }
 
-        goTo(if (isProximity) Step.AUTO else Step.MODE)
+        goTo(
+            when {
+                isProximity -> Step.AUTO
+                // Un widget à modifier garde son réseau : on y revient par le bouton retour.
+                existing != null || !hasNetworkStep -> Step.MODE
+                else -> Step.NETWORK
+            },
+        )
+        // Le format À proximité déduit son réseau de la position : il relit le catalogue lui-même.
+        if (!isProximity) refreshCatalog()
     }
+
+    /**
+     * L'étape du réseau n'a lieu d'être que s'il y a un choix à faire : un autre réseau connu, ou un
+     * catalogue encore jamais reçu, qui peut en apporter. Sans cela, la configuration garde ses
+     * quatre étapes.
+     */
+    private val hasNetworkStep: Boolean get() = catalog.others.isNotEmpty() || catalog.savedAt == 0L
 
     private fun bindViews() {
         stepBar = findViewById(R.id.step_bar)
@@ -266,6 +326,7 @@ class ConfigureActivity : Activity() {
             findViewById(R.id.step_segment_2),
             findViewById(R.id.step_segment_3),
             findViewById(R.id.step_segment_4),
+            findViewById(R.id.step_segment_5),
         )
         overline = findViewById(R.id.overline)
         stepTitle = findViewById(R.id.step_title)
@@ -350,6 +411,7 @@ class ConfigureActivity : Activity() {
         gridAdapter.setItems(emptyList())
         updateChrome()
         when (target) {
+            Step.NETWORK -> showNetworks()
             Step.MODE -> showModes()
             Step.LINE -> loadLines(forceRefresh)
             Step.STOP -> loadStops(forceRefresh)
@@ -367,13 +429,19 @@ class ConfigureActivity : Activity() {
             Step.LINE -> goTo(Step.MODE)
             Step.AUTO_COLOR -> goTo(Step.AUTO)
             Step.AUTO -> if (isProximity) finish() else goTo(Step.MODE)
-            Step.MODE -> finish()
+            Step.MODE -> if (hasNetworkStep) goTo(Step.NETWORK) else finish()
+            Step.NETWORK -> finish()
         }
     }
 
     /** Vrai si le retour change d'étape au lieu de fermer l'écran. */
     private val backStaysInside: Boolean
-        get() = step != Step.MODE && !(step == Step.AUTO && isProximity)
+        get() = when (step) {
+            Step.NETWORK -> false
+            Step.MODE -> hasNetworkStep
+            Step.AUTO -> !isProximity
+            else -> true
+        }
 
     /**
      * Android 13 et plus : le geste retour passe par OnBackInvokedCallback (onBackPressed n'est
@@ -400,28 +468,36 @@ class ConfigureActivity : Activity() {
     override fun onBackPressed() = navigateBack()
 
     private fun updateChrome() {
+        // Avec l'étape du réseau, les suivantes sont décalées d'un rang.
+        val shift = if (hasNetworkStep) 1 else 0
         val (index, label) = when (step) {
-            Step.MODE -> 1 to getString(R.string.step_mode)
-            Step.LINE -> 2 to getString(R.string.step_line)
-            Step.STOP -> 3 to getString(R.string.step_stop)
-            Step.DIRECTION -> 4 to getString(R.string.step_direction)
+            Step.NETWORK -> 1 to getString(R.string.step_network)
+            Step.MODE -> 1 + shift to getString(R.string.step_mode)
+            Step.LINE -> 2 + shift to getString(R.string.step_line)
+            Step.STOP -> 3 + shift to getString(R.string.step_stop)
+            Step.DIRECTION -> 4 + shift to getString(R.string.step_direction)
             Step.AUTO -> 0 to getString(if (isProximity) R.string.widget_proximite_name else R.string.step_auto)
             Step.AUTO_COLOR -> 0 to getString(R.string.step_direction)
         }
-        title = if (index == 0) label else getString(R.string.step_counter, index, label)
+        val total = 4 + shift
+        title = if (index == 0) label else getString(R.string.step_counter, index, total, label)
         stepTitle.text = label
 
         val inSteps = index > 0
         stepBar.visibility = if (inSteps) View.VISIBLE else View.GONE
         stepCount.visibility = if (inSteps) View.VISIBLE else View.GONE
-        stepCount.text = getString(R.string.step_count, index)
+        stepCount.text = getString(R.string.step_count, index, total)
         stepSegments.forEachIndexed { i, segment ->
+            segment.visibility = if (i < total) View.VISIBLE else View.GONE
             segment.setBackgroundResource(if (i < index) R.drawable.bg_step_on else R.drawable.bg_step_off)
         }
         overline.visibility = if (!inSteps && !isProximity) View.VISIBLE else View.GONE
 
+        // Le fil d'Ariane rappelle les choix faits ; le réseau n'y figure que s'il a été choisi.
+        val place = network.city.takeIf { hasNetworkStep }
         when (step) {
-            Step.LINE -> showCrumb(null, mode?.label.orEmpty())
+            Step.MODE -> if (place != null) showCrumb(null, place) else crumb.visibility = View.GONE
+            Step.LINE -> showCrumb(null, listOfNotNull(place, mode?.labelIn(network.id)).joinToString(" · "))
             Step.STOP -> showCrumb(line, line?.let(UiText::lineTitle).orEmpty())
             else -> crumb.visibility = View.GONE
         }
@@ -430,8 +506,8 @@ class ConfigureActivity : Activity() {
         search.hint = getString(
             when {
                 step == Step.LINE -> R.string.search_line_hint
-                prefs.hasApiKey -> R.string.search_stop_hint
-                // Les arrêts de Tracéo n'ont pas de commune.
+                network.isIdfm && prefs.hasApiKey -> R.string.search_stop_hint
+                // Les arrêts de Tracéo n'ont pas de commune, ou pas toujours hors Île-de-France.
                 else -> R.string.search_stop_hint_no_town
             },
         )
@@ -440,10 +516,11 @@ class ConfigureActivity : Activity() {
         footerHelp.visibility = View.GONE
         emptyText.visibility = View.GONE
 
-        bottomBar.visibility = if (step == Step.DIRECTION || step == Step.AUTO_COLOR) View.VISIBLE else View.GONE
-        colorSection.visibility = if (step == Step.AUTO) View.GONE else View.VISIBLE
+        val choosesFromList = step == Step.AUTO || step == Step.NETWORK
+        bottomBar.visibility = if (step == Step.DIRECTION || step == Step.AUTO_COLOR || step == Step.NETWORK) View.VISIBLE else View.GONE
+        colorSection.visibility = if (choosesFromList) View.GONE else View.VISIBLE
         notifySection.visibility = colorSection.visibility
-        save.setText(if (step == Step.AUTO) R.string.continue_label else R.string.save_widget)
+        save.setText(if (choosesFromList) R.string.continue_label else R.string.save_widget)
         if (step == Step.DIRECTION || step == Step.AUTO_COLOR) renderSwatches()
         hideKeyboard()
     }
@@ -513,7 +590,165 @@ class ConfigureActivity : Activity() {
         imm.hideSoftInputFromWindow(search.windowToken, 0)
     }
 
-    // --- Étape 1 : mode ---------------------------------------------------------------------
+    // --- Réseau ------------------------------------------------------------------------------
+
+    /**
+     * La liste des réseaux s'affiche tout de suite, avec ce que le téléphone en connaît et sans
+     * demander la position. Le catalogue est redemandé à Tracéo pendant ce temps, et le réseau de
+     * l'endroit est coché d'avance si la position est déjà accordée.
+     */
+    private fun showNetworks() {
+        renderNetworks()
+        refreshCatalog()
+        if (PositionReader(this).hasAnyAccess) locateNetwork(announce = false)
+    }
+
+    private fun renderNetworks() {
+        // Un réseau coupé depuis le dernier choix ne peut plus être proposé d'avance. Celui d'un
+        // widget à modifier reste le sien.
+        catalog.byId(network.id)?.let { known ->
+            val unusable = known.status == NetworkStatus.OFF && existing?.networkId != known.id
+            network = if (unusable) Networks.ILE_DE_FRANCE else known
+        }
+        val collator = Collator.getInstance(Locale.FRENCH).apply { strength = Collator.PRIMARY }
+        val networks = listOf(Networks.ILE_DE_FRANCE) + catalog.others.sortedWith { a, b -> collator.compare(a.city, b.city) }
+        val items = ArrayList<RowItem>()
+        if (!PositionReader(this).hasAnyAccess) {
+            items += RowItem(
+                title = getString(R.string.network_find),
+                subtitle = getString(R.string.network_find_sub),
+                iconRes = R.drawable.ic_pin,
+                style = RowStyle.CARD,
+                payload = FindNetworkRow,
+            )
+        }
+        networks.forEachIndexed { index, item ->
+            val off = item.status == NetworkStatus.OFF
+            items += RowItem(
+                title = item.city,
+                subtitle = networkSubtitle(item),
+                style = RowStyle.inGroup(index, networks.size),
+                radio = true,
+                checked = item.id == network.id,
+                enabled = !off,
+                dimmed = off,
+                payload = item,
+            )
+        }
+        adapter.setItems(items)
+        showList()
+        stepHelp.setText(
+            networkNotice ?: when {
+                catalogLoading && catalog.others.isEmpty() -> R.string.network_loading
+                catalogFailed -> R.string.network_unavailable
+                else -> R.string.network_help
+            },
+        )
+        stepHelp.visibility = View.VISIBLE
+        updateSaveEnabled()
+    }
+
+    /** Nom du réseau, son état s'il est dégradé, et ce qui le distingue pour cet usager. */
+    private fun networkSubtitle(item: Network): String {
+        val parts = ArrayList<String>()
+        if (item.name != item.city) parts += item.name
+        when (item.status) {
+            NetworkStatus.OFF -> parts += getString(R.string.network_off)
+            NetworkStatus.STALE -> parts += getString(R.string.network_stale)
+            NetworkStatus.OK -> Unit
+        }
+        when (item.id) {
+            existing?.networkId -> parts += getString(R.string.network_reason_current)
+            nearestNetwork -> parts += getString(R.string.network_reason_nearest)
+            prefs.lastNetwork -> parts += getString(R.string.network_reason_last)
+        }
+        return parts.joinToString(" · ")
+    }
+
+    /**
+     * Redemande le catalogue à Tracéo s'il a vieilli, sans retenir la liste déjà affichée. Après un
+     * échec, revenir à l'étape du réseau le redemande.
+     */
+    private fun refreshCatalog() {
+        if (catalogJob?.isActive == true) return
+        val store = Sources.catalog(this)
+        if (!store.isStale(System.currentTimeMillis(), CATALOG_MAX_AGE_MS)) return
+        catalogLoading = true
+        catalogJob = scope.launch {
+            val hadNetworkStep = hasNetworkStep
+            catalogFailed = withContext(Dispatchers.IO) {
+                try {
+                    store.refresh()
+                    false
+                } catch (e: IOException) {
+                    true
+                }
+            }
+            catalogLoading = false
+            catalog = store.read()
+            network = catalog.byId(network.id) ?: network
+            networkPoint?.let { nearestNetwork = catalog.nearest(it)?.id }
+            when {
+                // Tracéo a répondu, et n'a pas d'autre réseau : il n'y a rien à choisir ici.
+                step == Step.NETWORK && !hasNetworkStep -> goTo(Step.MODE)
+                step == Step.NETWORK -> {
+                    preselectNearest()
+                    renderNetworks()
+                }
+                // Un premier réseau vient d'arriver au catalogue : le choix est proposé tant que rien n'est engagé.
+                step == Step.MODE && existing == null && hasNetworkStep && !hadNetworkStep -> goTo(Step.NETWORK)
+                // L'étape du réseau est apparue ou a disparu : le compte des étapes et le retour changent.
+                step == Step.MODE && hasNetworkStep != hadNetworkStep -> goTo(Step.MODE)
+            }
+        }
+    }
+
+    private fun findNetwork() {
+        if (PositionReader(this).hasAnyAccess) {
+            locateNetwork(announce = true)
+        } else {
+            // La position approximative suffit pour reconnaître une ville.
+            requestPermissions(arrayOf(Manifest.permission.ACCESS_COARSE_LOCATION), REQUEST_NETWORK_LOCATION)
+        }
+    }
+
+    /**
+     * Coche le réseau de l'endroit où l'on est. La position ne sert qu'ici, sur le téléphone.
+     * @param announce vrai si l'usager l'a demandé : un échec est alors expliqué
+     */
+    private fun locateNetwork(announce: Boolean) {
+        locateJob?.cancel()
+        locateJob = scope.launch {
+            val fix = PositionReader(this@ConfigureActivity).readApproximate()
+            if (step != Step.NETWORK) return@launch
+            networkPoint = fix?.point
+            nearestNetwork = fix?.let { catalog.nearest(it.point) }?.id
+            networkNotice = when {
+                !announce || nearestNetwork != null -> null
+                fix == null -> R.string.network_position_unknown
+                // Le catalogue n'est pas encore arrivé : il dira peut-être quel réseau dessert l'endroit.
+                catalogLoading -> null
+                else -> R.string.network_none_near
+            }
+            preselectNearest()
+            renderNetworks()
+        }
+    }
+
+    /** Le réseau de l'endroit passe devant le dernier choisi, tant que l'usager n'a rien décidé. */
+    private fun preselectNearest() {
+        if (networkTouched || existing != null) return
+        nearestNetwork?.let(catalog::byId)?.let { network = it }
+    }
+
+    private fun confirmNetwork() {
+        network = adapter.items.firstOrNull { it.checked }?.payload as? Network ?: return
+        // Continuer est une décision : la position, si elle arrive après, ne la défait pas.
+        networkTouched = true
+        goTo(Step.MODE)
+    }
+
+    // --- Mode -------------------------------------------------------------------------------
 
     private fun showModes() {
         val hasKey = prefs.hasApiKey
@@ -526,7 +761,9 @@ class ConfigureActivity : Activity() {
             payload = AutoRow,
         )
         // Un arrêt choisi avec une clé retirée depuis n'existe pas chez Tracéo : impossible de le garder.
-        existing?.takeIf { !it.auto && DataSources.route(it, hasKey) != PassageRoute.RECONFIGURE }?.let { cfg ->
+        // Un arrêt d'un autre réseau que celui qui vient d'être choisi non plus.
+        val keepable = existing?.takeIf { !it.auto && it.networkId == network.id && DataSources.route(it, hasKey) != PassageRoute.RECONFIGURE }
+        keepable?.let { cfg ->
             items += RowItem(
                 title = getString(R.string.keep_current),
                 subtitle = getString(R.string.keep_current_sub, UiText.lineTitle(cfg.line), cfg.stop.name),
@@ -535,18 +772,19 @@ class ConfigureActivity : Activity() {
                 payload = cfg,
             )
         }
-        val modes = DataSources.modes(hasKey)
+        val modes = DataSources.modes(network, hasKey)
         modes.forEachIndexed { index, m ->
             items += RowItem(
-                title = m.label,
-                subtitle = UiText.modeSubtitle(m),
+                title = m.labelIn(network.id),
+                subtitle = UiText.modeSubtitle(m, network.id),
                 chip = UiText.modeChip(m),
                 style = RowStyle.inGroup(index, modes.size),
                 chevron = true,
                 payload = m,
             )
         }
-        if (!hasKey) {
+        // La clé PRIM ne sert qu'à l'Île-de-France.
+        if (network.isIdfm && !hasKey) {
             items += RowItem(
                 title = getString(R.string.key_optional_row),
                 subtitle = getString(R.string.key_optional_row_sub),
@@ -561,6 +799,16 @@ class ConfigureActivity : Activity() {
 
     private fun onItemClicked(item: RowItem) {
         when (step) {
+            Step.NETWORK -> when (val payload = item.payload) {
+                FindNetworkRow -> findNetwork()
+                is Network -> {
+                    networkTouched = true
+                    network = payload
+                    adapter.items.forEach { if (it.radio) it.checked = it === item }
+                    adapter.notifyDataSetChanged()
+                    updateSaveEnabled()
+                }
+            }
             Step.MODE -> when (val payload = item.payload) {
                 is WidgetConfig -> {
                     mode = payload.mode
@@ -626,8 +874,18 @@ class ConfigureActivity : Activity() {
 
     override fun onRequestPermissionsResult(requestCode: Int, permissions: Array<out String>, grantResults: IntArray) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults)
-        if (requestCode != REQUEST_LOCATION || step != Step.AUTO) return
         val granted = permissions.filterIndexed { i, _ -> grantResults.getOrNull(i) == PackageManager.PERMISSION_GRANTED }
+        if (requestCode == REQUEST_NETWORK_LOCATION && step == Step.NETWORK) {
+            if (granted.isNotEmpty()) {
+                locateNetwork(announce = true)
+            } else {
+                // Refusée : la liste reste là, le réseau se choisit à la main.
+                networkNotice = R.string.network_position_denied
+                renderNetworks()
+            }
+            return
+        }
+        if (requestCode != REQUEST_LOCATION || step != Step.AUTO) return
         when {
             Manifest.permission.ACCESS_FINE_LOCATION in granted -> loadAuto()
             Manifest.permission.ACCESS_COARSE_LOCATION in granted -> showMessage(
@@ -770,21 +1028,21 @@ class ConfigureActivity : Activity() {
         finishSaved()
     }
 
-    // --- Étape 2 : ligne --------------------------------------------------------------------
+    // --- Ligne ------------------------------------------------------------------------------
 
     private fun loadLines(forceRefresh: Boolean) {
         val m = mode ?: return goTo(Step.MODE)
         showLoading(getString(R.string.loading_lines))
         loadJob = scope.launch {
             try {
-                val lines = repository.lines(m, forceRefresh)
+                val lines = repository.lines(m, forceRefresh, network)
                 if (lines.isEmpty()) {
                     showMessage(getString(R.string.no_result), canRetry = true)
                 } else {
                     val items = lines.map { l ->
                         RowItem(
                             title = UiText.lineTitle(l),
-                            subtitle = l.subtitle().ifEmpty { null },
+                            subtitle = lineSubtitle(l),
                             badge = l,
                             searchExtra = "${l.shortName} ${l.name}",
                             payload = l,
@@ -807,17 +1065,32 @@ class ConfigureActivity : Activity() {
         }
     }
 
-    private fun fitsGrid(lines: List<Line>): Boolean =
-        lines.size <= GRID_MAX_LINES && lines.all { it.shortName.trim().ifEmpty { it.name.trim() }.length <= GRID_MAX_LABEL }
+    /**
+     * En Île-de-France, le réseau commercial et l'exploitant. Ailleurs, le parcours quand le titre
+     * n'est que le code de la ligne, et l'absence de temps réel, à savoir avant de choisir.
+     */
+    private fun lineSubtitle(l: Line): String? {
+        if (Networks.isIdfm(l.networkId)) return l.subtitle().ifEmpty { null }
+        val parts = ArrayList<String>()
+        l.name.trim().takeIf { it.isNotEmpty() && it != UiText.lineTitle(l) && it != l.shortName.trim() }?.let { parts += it }
+        if (!l.realtime) parts += getString(R.string.line_no_realtime)
+        return parts.joinToString(" · ").ifEmpty { null }
+    }
 
-    // --- Étape 3 : arrêt --------------------------------------------------------------------
+    /** La grille ne montre que des pastilles : elle cacherait le parcours et l'absence de temps réel d'une ligne d'un autre réseau. */
+    private fun fitsGrid(lines: List<Line>): Boolean =
+        lines.size <= GRID_MAX_LINES && lines.all {
+            Networks.isIdfm(it.networkId) && it.shortName.trim().ifEmpty { it.name.trim() }.length <= GRID_MAX_LABEL
+        }
+
+    // --- Arrêt ------------------------------------------------------------------------------
 
     private fun loadStops(forceRefresh: Boolean) {
         val l = line ?: return goTo(Step.LINE)
         showLoading(getString(R.string.loading_stops))
         loadJob = scope.launch {
             try {
-                val stops = repository.stops(l, forceRefresh)
+                val stops = repository.stops(l, forceRefresh, network)
                 if (stops.isEmpty()) {
                     showMessage(getString(R.string.no_stop), canRetry = true)
                 } else {
@@ -833,7 +1106,7 @@ class ConfigureActivity : Activity() {
         }
     }
 
-    // --- Étape 4 : sens et couleur ------------------------------------------------------------
+    // --- Sens et couleur ----------------------------------------------------------------------
 
     private fun loadDirections() {
         val l = line ?: return goTo(Step.LINE)
@@ -886,10 +1159,12 @@ class ConfigureActivity : Activity() {
 
             val errors = results.mapNotNull { it.second.exceptionOrNull() }
             val help = getString(if (oneDirectionOnly) R.string.direction_help_single else R.string.direction_help)
-            footerHelp.text = if (errors.isNotEmpty() && errors.size == results.size) {
-                getString(R.string.error_directions, errors.first().message ?: "") + "\n\n" + help
-            } else {
-                help
+            footerHelp.text = when {
+                errors.isNotEmpty() && errors.size == results.size ->
+                    getString(R.string.error_directions, errors.first().message ?: "") + "\n\n" + help
+                // Aucun sens ne sera jamais détecté : l'aide habituelle ferait attendre pour rien.
+                !l.realtime -> getString(R.string.direction_no_realtime)
+                else -> help
             }
             footerHelp.visibility = View.VISIBLE
             updateSaveEnabled()
@@ -965,7 +1240,9 @@ class ConfigureActivity : Activity() {
             Toast.makeText(this, message, Toast.LENGTH_LONG).show()
             return
         }
-        prefs.saveConfig(directionConfig() ?: return)
+        val config = directionConfig() ?: return
+        prefs.saveConfig(config)
+        prefs.lastNetwork = config.networkId
         finishSaved()
     }
 
