@@ -256,6 +256,41 @@ enregistrées conformes au chapitre 5.
   n'ont pas de clé à demander : leurs données sont ouvertes, et Tracéo les relève déjà. »
 - **Réglages.** Les sources des widgets posés se rangent par ville.
 
+### Lot 9 : modes et pastilles
+
+- **Ordre des modes hors Île-de-France** : Métro, Tramway, Train, Bus, Bateau, puis câble et
+  funiculaire. L'ordre du catalogue ne compte pas. L'Île-de-France garde le sien, avec le RER.
+- **Libellés.** « Câble » est le nom du Câble C1 francilien : ailleurs, le mode s'appelle
+  « Téléphérique », « Funiculaire », ou « Téléphérique / Funiculaire » si le réseau a les deux, ou
+  n'annonce ni l'un ni l'autre. Une ligne se titre « Tram B », « Métro A », « Bateau BAT3 »,
+  « Téléphérique C ». La petite pastille du mode, elle, garde « Câble » (transport par câble), ou
+  « Funi » pour un réseau qui n'a qu'un funiculaire ; son texte se réduit pour tenir dans sa case,
+  où « Bateau » débordait.
+- **Réseau dont le catalogue ne dit pas les modes** : tous sont proposés, plutôt qu'aucun.
+- **Codes longs.** Jusqu'à 7 caractères, le code entre entier dans la pastille, écrit plus petit à
+  partir de 4. Au-delà il perd d'abord ses espaces (« Flexo 51 » donne « Flexo51 ») ; s'il ne tient
+  toujours pas, il est coupé au milieu avec « … » (« Navette Gare » donne « Nav…are ») : la fin du
+  code, qui distingue les lignes d'une même famille, reste. Le titre de la ligne et les lecteurs
+  d'écran gardent le code entier. En Île-de-France, le code et la forme des pastilles ne changent
+  pas.
+- **Ligne sans couleur** : elle prend la couleur de son mode, dans les listes comme dans les
+  widgets (bus vert, tram bleu-vert, métro bleu, train violet, bateau bleu, autres gris-bleu).
+- **Blanc servi faute de couleur.** Tant que Tracéo sert le blanc et le noir par défaut du GTFS,
+  l'appli traite ce couple comme une absence de couleur, hors Île-de-France. Elle le fera encore
+  quand le serveur servira `null` : un réseau qui choisirait vraiment du blanc avec un texte noir
+  verrait ses lignes à la couleur de leur mode. Un blanc avec un texte d'une autre couleur est
+  gardé.
+- **Texte illisible.** La couleur de texte publiée n'est gardée que si elle se lit sur la couleur
+  de la ligne ; sinon l'appli met du noir ou du blanc, le plus lisible des deux. Les listes de la
+  configuration suivent maintenant la même règle que les widgets, Île-de-France comprise : une
+  pastille francilienne dont le texte se lisait mal y change donc de couleur de texte. Sur un fond
+  à la couleur de la ligne, si le petit texte ne peut pas se lire dans la couleur publiée même en
+  retouchant le fond (rouge sur blanc), il passe au noir ou au blanc.
+- **Noir servi faute de couleur de texte.** Tracéo sert le noir par défaut du GTFS quand le réseau
+  ne publie pas de couleur de texte, même pour une ligne dont il publie la couleur. Hors
+  Île-de-France, l'appli ne tient donc pas compte d'un texte noir : elle choisit elle-même entre le
+  noir et le blanc, ce qui redonne le noir là où il était le bon choix (question Q5).
+
 ## 11. Questions à Tracéo
 
 Ce qui manque à l'appli dans le contrat, et qu'elle ne contourne qu'en attendant une réponse.
@@ -265,3 +300,4 @@ Ce qui manque à l'appli dans le contrat, et qu'elle ne contourne qu'en attendan
 | Q1 | Un code stable dans le corps des 404 (par exemple `code` : `network`, `line`, `stop`, `route`), à côté du message | Elle reconnaît le message en toutes lettres ; reformulé, il redevient un 404 sans précision |
 | Q2 | Un délai relatif à côté de `nextAt` (comme `ageSec` l'est pour `fetchedAt`), pour ne pas dépendre de l'horloge du téléphone | Elle compare `nextAt` à sa propre horloge |
 | Q4 | Dans la réponse des passages, un indicateur explicite de réveil (par exemple `waking` : vrai), au lieu de le déduire de `fresh` et de `nextAt` | Elle prend pour un réveil toute réponse sans relevé récent dont le `nextAt` est à moins de 20 secondes, et borne ses retours à deux |
+| Q5 | `textColor` nul quand le réseau ne publie pas de couleur de texte, même s'il publie la couleur de la ligne | Hors Île-de-France, elle ne tient pas compte d'un texte noir |

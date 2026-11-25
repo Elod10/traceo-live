@@ -21,12 +21,31 @@ enum class TransportMode(val label: String, val apiModes: List<String>) {
     /** Navettes fluviales ou maritimes : le référentiel d'Île-de-France n'en a pas. */
     BOAT("Bateau", listOf("boat"));
 
-    /** Libellé du mode dans un réseau : le Transilien et le Noctilien n'existent qu'en Île-de-France. */
+    /**
+     * Libellé du mode dans un réseau. Le Transilien et le Noctilien n'existent qu'en Île-de-France,
+     * et « câble » y est le nom du Câble C1 : ailleurs, c'est un téléphérique.
+     */
     fun labelIn(networkId: String): String = when {
         Networks.isIdfm(networkId) -> label
         this == TRAIN -> "Train"
         this == BUS -> "Bus"
+        this == OTHER -> "Téléphérique / Funiculaire"
         else -> label
+    }
+
+    /**
+     * Libellé du mode dans ce réseau : il ne nomme que ce que le réseau a vraiment. Un réseau qui
+     * n'annonce ni l'un ni l'autre garde le libellé des deux.
+     */
+    fun labelIn(network: Network): String {
+        if (network.isIdfm || this != OTHER) return labelIn(network.id)
+        val cable = "cableway" in network.modes
+        val funicular = "funicular" in network.modes
+        return when {
+            cable && !funicular -> "Téléphérique"
+            funicular && !cable -> "Funiculaire"
+            else -> labelIn(network.id)
+        }
     }
 
     /** Pour les lignes ferrées, on sépare le RER du reste (Transilien, TER...). */
@@ -42,6 +61,12 @@ enum class TransportMode(val label: String, val apiModes: List<String>) {
     companion object {
         /** Les modes de l'Île-de-France, dans l'ordre du menu. */
         val IDFM: List<TransportMode> = listOf(METRO, RER, TRAIN, TRAM, BUS, OTHER)
+
+        /**
+         * Les modes d'un autre réseau, dans l'ordre du menu : du plus structurant au plus rare. Le
+         * tram passe devant le train, qu'aucun réseau urbain ne met en avant ; pas de RER.
+         */
+        val ELSEWHERE: List<TransportMode> = listOf(METRO, TRAM, TRAIN, BUS, BOAT, OTHER)
 
         fun fromName(name: String?): TransportMode? = entries.firstOrNull { it.name == name }
     }

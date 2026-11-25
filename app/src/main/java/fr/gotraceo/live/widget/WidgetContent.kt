@@ -239,7 +239,58 @@ data class DirectionGroup(val label: String, val passages: List<Passage>) {
 
 enum class BadgeShape { CIRCLE, SQUARE, BUS, TRAM }
 
-data class LineBadge(val label: String, val shape: BadgeShape)
+/**
+ * @param label code porté par la pastille, coupé s'il est trop long
+ * @param textScale taille du texte par rapport à celle d'un code court
+ * @param code code entier de la ligne, pour les lecteurs d'écran
+ */
+data class LineBadge(val label: String, val shape: BadgeShape, val textScale: Float = 1f, val code: String = label)
+
+/** Le code d'une ligne d'un réseau hors Île-de-France, tel que sa pastille le porte. */
+object BadgeLabels {
+
+    /** Au-delà, un code ne tient plus dans une pastille. */
+    const val MAX_LENGTH = 7
+
+    /** Caractères gardés au début d'un code coupé ; la fin en garde autant. */
+    private const val HEAD = 3
+
+    /**
+     * Le code entier s'il tient, au besoin sans ses espaces (« Flexo 51 » devient « Flexo51 »). Sinon
+     * il est coupé au milieu, et la coupe se voit : la fin d'un code est ce qui distingue les lignes
+     * d'une même famille, « Navette 12 » et « Navette 14 » ne doivent pas porter la même pastille.
+     */
+    fun label(code: String): String {
+        val text = code.trim()
+        if (text.length <= MAX_LENGTH) return text
+        val tight = text.filterNot { it.isWhitespace() }
+        if (tight.length <= MAX_LENGTH) return tight
+        return tight.take(HEAD) + "…" + tight.takeLast(MAX_LENGTH - HEAD - 1)
+    }
+
+    /**
+     * Le code et la taille de son texte, en fraction de la hauteur, pour la pastille des listes de
+     * l'application. En Île-de-France, rien ne change : le code est tronqué à [MAX_LENGTH] caractères.
+     */
+    fun forList(line: Line): Pair<String, Float> {
+        val idfm = Networks.isIdfm(line.networkId)
+        val code = line.shortName.trim().ifEmpty { line.name.trim() }
+        val label = if (idfm) code.take(MAX_LENGTH) else label(code)
+        val size = when {
+            label.length <= 3 -> 0.64f
+            idfm || label.length <= 5 -> 0.54f
+            else -> 0.46f
+        }
+        return label to size
+    }
+
+    /** Un code long s'écrit plus petit, pour que la pastille ne prenne pas la place du nom de l'arrêt. */
+    fun textScale(label: String): Float = when {
+        label.length <= 3 -> 1f
+        label.length <= 5 -> 0.84f
+        else -> 0.7f
+    }
+}
 
 enum class NoticeKind {
     NOT_CONFIGURED,
@@ -501,7 +552,7 @@ object WidgetContent {
     fun describe(model: WidgetModel): String {
         if (model.format == WidgetFormat.PROXIMITE) return describeProximity(model)
         val parts = ArrayList<String>()
-        model.line?.let { parts += "Ligne ${it.label}" }
+        model.line?.let { parts += "Ligne ${it.code}" }
         if (model.stopName.isNotEmpty()) parts += model.stopName
         val header = parts.joinToString(", ")
         val body = model.groups.joinToString(" ") { group ->
@@ -520,7 +571,7 @@ object WidgetContent {
                 val then = direction.next?.let { ", puis ${it.spokenWait}" }.orEmpty()
                 "Vers ${direction.label} : ${direction.first.spokenWait}$then."
             }.ifEmpty { "Aucun passage." }
-            "Ligne ${row.badge.label}, ${row.place}. $directions"
+            "Ligne ${row.badge.code}, ${row.place}. $directions"
         }
         val stale = if (model.stale) " Actualisation impossible, données de ${model.timeLabel}." else ""
         val hint = model.autoHint?.let { " $it." }.orEmpty()
@@ -712,11 +763,14 @@ object WidgetModels {
 
     private fun badgeOf(line: Line): LineBadge {
         val raw = line.shortName.trim().ifEmpty { line.name.trim() }
-        val label = (if (line.isRer()) raw.removePrefix("RER").trim().ifEmpty { raw } else raw).take(7)
-        val shape = when {
+        if (!Networks.isIdfm(line.networkId)) {
             // Hors Île-de-France, une même pastille pour tous les modes : le rond du métro et les
-            // filets du tram sont le code de formes francilien.
-            !Networks.isIdfm(line.networkId) -> BadgeShape.BUS
+            // filets du tram sont le code de formes francilien. Les codes y sont parfois longs.
+            val label = BadgeLabels.label(raw)
+            return LineBadge(label, BadgeShape.BUS, BadgeLabels.textScale(label), raw)
+        }
+        val label = (if (line.isRer()) raw.removePrefix("RER").trim().ifEmpty { raw } else raw).take(BadgeLabels.MAX_LENGTH)
+        val shape = when {
             line.mode == "metro" || line.isRer() -> BadgeShape.CIRCLE
             line.mode == "rail" -> BadgeShape.SQUARE
             line.mode == "tram" -> BadgeShape.TRAM
