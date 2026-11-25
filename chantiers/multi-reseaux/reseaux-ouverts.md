@@ -231,6 +231,31 @@ enregistrées conformes au chapitre 5.
   un build de release, c'est la production. Une adresse en `http://` n'est joignable que par le
   build de debug. Une clé mal écrite donne un avertissement, et la production.
 
+### Lot 8 : étape « Réseau » à une vingtaine d'entrées
+
+- **Ordre.** En tête : le réseau du widget à modifier, puis le plus proche, puis le dernier choisi,
+  puis celui qui est coché s'il n'est aucun des trois, chacun une seule fois : le réseau coché
+  reste ainsi toujours en vue. Sans aucune de ces raisons, l'Île-de-France reste en tête. Les
+  autres suivent par ville, dans l'ordre alphabétique français (accents et casse ne comptent pas) ;
+  l'Île-de-France y prend alors sa place, à I. Un réseau coupé reste à sa place, grisé, et ne
+  passe devant que pour le widget qui s'y trouve déjà.
+- **Recherche.** À partir de 8 réseaux, une recherche apparaît au-dessus de la liste, par ville ou
+  par nom de réseau (« bordeaux » ou « tbm »), sans égard aux accents ; l'Île-de-France se trouve
+  aussi par « Paris ». L'état d'un réseau et la raison de sa place ne se cherchent pas, et
+  « Trouver mon réseau » s'efface dès qu'un texte est saisi. Les réseaux de tête ont alors leur
+  propre carte, les autres la leur. En dessous de 8, une seule carte et pas de recherche, comme au
+  pilote ; l'ordre, lui, suit la même règle (à Troyes : Troyes, puis l'Île-de-France).
+- **« Continuer » ne valide que ce qui se voit.** Si la recherche masque le réseau coché, ou si
+  aucun n'est coché, le bouton se grise et dit de toucher un réseau de la liste.
+- **Liste redessinée sans sauter.** Quand le catalogue ou la position arrivent, la liste garde sa
+  place et le texte cherché. Si le réseau coché vient de changer, elle revient en haut, où il se
+  trouve, et la recherche en cours est effacée. Le dernier réseau choisi est coché d'avance même
+  quand le catalogue n'arrive qu'après l'ouverture de l'écran.
+- **Écran de la clé.** Il ne liste plus que les réseaux qui acceptent une clé personnelle,
+  aujourd'hui l'Île-de-France, suivis d'une phrase pour tous les autres : « Les autres réseaux
+  n'ont pas de clé à demander : leurs données sont ouvertes, et Tracéo les relève déjà. »
+- **Réglages.** Les sources des widgets posés se rangent par ville.
+
 ## 11. Questions à Tracéo
 
 Ce qui manque à l'appli dans le contrat, et qu'elle ne contourne qu'en attendant une réponse.

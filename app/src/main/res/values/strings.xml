@@ -115,11 +115,10 @@
     <string name="key_networks_title">Clé API</string>
     <string name="key_networks_help">Facultative. Avec une clé personnelle, votre téléphone interroge le réseau directement, sans passer par Tracéo. La clé reste sur ce téléphone et n\'est jamais envoyée à Tracéo.</string>
     <string name="key_networks_label">Choisissez le réseau</string>
-    <string name="key_networks_footer">Seuls les réseaux qui proposent une clé personnelle peuvent en recevoir une.</string>
+    <string name="key_networks_footer">Les autres réseaux n\'ont pas de clé à demander : leurs données sont ouvertes, et Tracéo les relève déjà.</string>
     <string name="key_network_idfm_title">Île-de-France · PRIM</string>
     <string name="key_network_idfm_sub">Ajoute la voie, le câble et le funiculaire, et l\'actualisation chaque minute. Compte gratuit sur le portail PRIM.</string>
     <string name="key_network_none">Aucune clé enregistrée</string>
-    <string name="key_network_open">Pas de clé à demander : les données de %1$s sont ouvertes, et Tracéo les relève déjà.</string>
     <string name="main_key_help">Facultative. Sans clé, les passages de PRIM passent par Tracéo, qui met ses réponses en cache. Avec une clé, votre téléphone interroge directement PRIM, et les widgets gagnent :</string>
     <string name="key_gain_platform">La voie, quand elle est connue</string>
     <string name="key_gain_minute">Une actualisation possible chaque minute</string>
@@ -183,6 +182,7 @@
     <string name="network_unavailable">Les autres réseaux n\'ont pas pu être chargés : vérifiez la connexion, puis revenez à cette étape.</string>
     <string name="network_find">Trouver mon réseau</string>
     <string name="network_find_sub">Avec votre position approximative : elle sert seulement à reconnaître votre ville, sur ce téléphone.</string>
+    <string name="network_pick_one">Touchez un réseau de la liste pour le choisir.</string>
     <string name="network_position_denied">Sans accès à la position, choisissez votre réseau dans la liste.</string>
     <string name="network_position_unknown">Position introuvable : choisissez votre réseau dans la liste.</string>
     <string name="network_none_near">Aucun de ces réseaux ne dessert l\'endroit où vous êtes. Vous pouvez tout de même en choisir un pour un autre lieu.</string>
@@ -193,6 +193,7 @@
     <string name="network_stale">Temps réel interrompu pour le moment</string>
     <string name="line_no_realtime">Sans temps réel</string>
     <string name="direction_no_realtime">Cette ligne n\'a pas de temps réel : le widget ne pourra pas afficher ses passages.</string>
+    <string name="search_network_hint">Rechercher une ville ou un réseau</string>
     <string name="search_line_hint">Rechercher une ligne (numéro, nom, réseau…)</string>
     <string name="search_stop_hint">Rechercher un arrêt ou une commune</string>
     <string name="search_stop_hint_no_town">Rechercher un arrêt</string>

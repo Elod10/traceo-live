@@ -11,6 +11,7 @@ import android.widget.TextView
 import fr.gotraceo.live.R
 import fr.gotraceo.live.data.DataSources
 import fr.gotraceo.live.data.NetworkCatalog
+import fr.gotraceo.live.data.NetworkChoices
 import fr.gotraceo.live.data.Networks
 import fr.gotraceo.live.data.Prefs
 import fr.gotraceo.live.widget.QuotaAlerts
@@ -98,7 +99,10 @@ class SettingsActivity : Activity() {
     private fun renderOtherSources(catalog: NetworkCatalog) {
         val container = findViewById<LinearLayout>(R.id.other_sources)
         container.removeAllViews()
-        Sources.usedNetworks(this).filter { !Networks.isIdfm(it) }.forEach { id ->
+        // Par ville, comme à la configuration ; un réseau sorti du catalogue vient après, sous son identifiant.
+        val used = Sources.usedNetworks(this).filter { !Networks.isIdfm(it) }
+        val known = used.mapNotNull(catalog::byId).sortedWith(NetworkChoices.byCity).map { it.id }
+        (known + used.filter { it !in known }).forEach { id ->
             val network = catalog.byId(id)
             val view = layoutInflater.inflate(R.layout.item_source_network, container, false)
             view.findViewById<TextView>(R.id.source_network_title).text = when {

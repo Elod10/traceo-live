@@ -43,6 +43,7 @@ import fr.gotraceo.live.data.Line
 import fr.gotraceo.live.data.NearbyLookup
 import fr.gotraceo.live.data.Network
 import fr.gotraceo.live.data.NetworkCatalog
+import fr.gotraceo.live.data.NetworkChoices
 import fr.gotraceo.live.data.NetworkStatus
 import fr.gotraceo.live.data.Networks
 import fr.gotraceo.live.data.PassageRoute
@@ -79,8 +80,6 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.IOException
 import java.lang.ref.WeakReference
-import java.text.Collator
-import java.util.Locale
 import kotlin.math.min
 import kotlin.math.roundToInt
 
@@ -171,6 +170,9 @@ class ConfigureActivity : Activity() {
 
     /** Message de l'étape du réseau, à la place de son aide. */
     private var networkNotice: Int? = null
+
+    /** Vrai si la liste des réseaux est assez longue pour qu'on y cherche. */
+    private var networkSearch = false
     private var mode: TransportMode? = null
     private var line: Line? = null
     private var stop: Stop? = null
@@ -548,9 +550,11 @@ class ConfigureActivity : Activity() {
             else -> crumb.visibility = View.GONE
         }
 
+        // À l'étape du réseau, la recherche n'apparaît que si la liste est longue : renderNetworks en décide.
         searchBox.visibility = if (step == Step.LINE || step == Step.STOP) View.VISIBLE else View.GONE
         search.hint = getString(
             when {
+                step == Step.NETWORK -> R.string.search_network_hint
                 step == Step.LINE -> R.string.search_line_hint
                 network.isIdfm && prefs.hasApiKey -> R.string.search_stop_hint
                 // Les arrêts de Tracéo n'ont pas de commune, ou pas toujours hors Île-de-France.
@@ -585,11 +589,13 @@ class ConfigureActivity : Activity() {
         badge?.let { crumbBadge.setImageBitmap(BadgeRenderer.render(this, it, 22f)) }
     }
 
-    private fun showList() {
+    /** @param keepScroll vrai pour redessiner une liste déjà à l'écran sans la ramener en haut */
+    private fun showList(keepScroll: Boolean = false) {
         statusBox.visibility = View.GONE
         grid.visibility = View.GONE
+        val shown = list.visibility == View.VISIBLE
         list.visibility = View.VISIBLE
-        list.setSelection(0)
+        if (!keepScroll || !shown) list.setSelection(0)
     }
 
     private fun showGrid() {
@@ -629,9 +635,22 @@ class ConfigureActivity : Activity() {
     private fun applySearch(text: String) {
         adapter.filter(text)
         gridAdapter.filter(text)
-        val searching = step == Step.LINE || step == Step.STOP
+        // Les résultats se lisent depuis le haut. Après le filtre : une liste qui change garde sinon sa place.
+        if (list.visibility == View.VISIBLE) list.setSelection(0)
+        updateEmptyText()
+        // Le réseau coché peut être masqué par la recherche : « Continuer » ne le validerait pas.
+        if (step == Step.NETWORK) updateSaveEnabled()
+    }
+
+    /**
+     * « Aucun résultat », sans toucher aux listes : les adaptateurs gardent le texte cherché et le
+     * réappliquent à chaque nouvelle liste. Les refiltrer après avoir placé la liste annulerait ce
+     * placement.
+     */
+    private fun updateEmptyText() {
+        val searching = step == Step.LINE || step == Step.STOP || step == Step.NETWORK
         val showing = if (grid.visibility == View.VISIBLE) gridAdapter.count else adapter.count
-        emptyText.visibility = if (searching && statusBox.visibility != View.VISIBLE && text.isNotBlank() && showing == 0) {
+        emptyText.visibility = if (searching && statusBox.visibility != View.VISIBLE && search.text.isNotBlank() && showing == 0) {
             View.VISIBLE
         } else {
             View.GONE
@@ -651,20 +670,30 @@ class ConfigureActivity : Activity() {
      * l'endroit est coché d'avance si la position est déjà accordée.
      */
     private fun showNetworks() {
-        renderNetworks()
+        renderNetworks(fromTop = true)
         refreshCatalog()
         if (PositionReader(this).hasAnyAccess) locateNetwork(announce = false)
     }
 
-    private fun renderNetworks() {
+    /**
+     * @param fromTop vrai à l'arrivée sur l'étape ; faux quand le catalogue ou la position redessinent
+     *        une liste que l'usager parcourt peut-être déjà
+     */
+    private fun renderNetworks(fromTop: Boolean = false) {
         // Un réseau coupé depuis le dernier choix ne peut plus être proposé d'avance. Celui d'un
         // widget à modifier reste le sien.
         catalog.byId(network.id)?.let { known ->
             val unusable = known.status == NetworkStatus.OFF && existing?.networkId != known.id
             network = if (unusable) Networks.ILE_DE_FRANCE else known
         }
-        val collator = Collator.getInstance(Locale.FRENCH).apply { strength = Collator.PRIMARY }
-        val networks = listOf(Networks.ILE_DE_FRANCE) + catalog.others.sortedWith { a, b -> collator.compare(a.city, b.city) }
+        // Le réseau du widget, le plus proche et le dernier choisi passent devant, avec celui qui est
+        // coché ; les autres suivent par ville. Une liste longue se cherche, et ses premiers choix
+        // ont leur propre carte.
+        val choices = NetworkChoices.of(catalog, existing?.networkId, nearestNetwork, prefs.lastNetwork, checked = network.id)
+        networkSearch = choices.searchable
+        searchBox.visibility = if (networkSearch) View.VISIBLE else View.GONE
+        // Une liste redevenue courte n'a plus de champ : le texte qui s'y trouvait ne doit plus la filtrer.
+        if (!networkSearch && search.text.isNotEmpty()) search.setText("")
         val items = ArrayList<RowItem>()
         if (!PositionReader(this).hasAnyAccess) {
             items += RowItem(
@@ -673,23 +702,31 @@ class ConfigureActivity : Activity() {
                 iconRes = R.drawable.ic_pin,
                 style = RowStyle.CARD,
                 payload = FindNetworkRow,
+                // Une action, pas un réseau : elle s'efface devant les résultats d'une recherche.
+                searchOnly = "",
             )
         }
-        networks.forEachIndexed { index, item ->
-            val off = item.status == NetworkStatus.OFF
-            items += RowItem(
-                title = item.city,
-                subtitle = networkSubtitle(item),
-                style = RowStyle.inGroup(index, networks.size),
-                radio = true,
-                checked = item.id == network.id,
-                enabled = !off,
-                dimmed = off,
-                payload = item,
-            )
+        choices.cards.forEach { group ->
+            group.forEachIndexed { index, item ->
+                val off = item.status == NetworkStatus.OFF
+                items += RowItem(
+                    title = item.city,
+                    subtitle = networkSubtitle(item),
+                    style = RowStyle.inGroup(index, group.size),
+                    radio = true,
+                    checked = item.id == network.id,
+                    enabled = !off,
+                    dimmed = off,
+                    payload = item,
+                    // Par ville ou par nom de réseau, pas par état ni par raison d'être en tête.
+                    searchOnly = NetworkChoices.searchText(item),
+                )
+            }
         }
         adapter.setItems(items)
-        showList()
+        // Placer la liste en dernier : un changement de contenu après coup la ramènerait où elle était.
+        showList(keepScroll = !fromTop)
+        updateEmptyText()
         stepHelp.setText(
             networkNotice ?: when {
                 catalogLoading && catalog.others.isEmpty() -> R.string.network_loading
@@ -747,10 +784,7 @@ class ConfigureActivity : Activity() {
             when {
                 // Tracéo a répondu, et n'a pas d'autre réseau : il n'y a rien à choisir ici.
                 step == Step.NETWORK && !hasNetworkStep -> goTo(Step.MODE)
-                step == Step.NETWORK -> {
-                    preselectNearest()
-                    renderNetworks()
-                }
+                step == Step.NETWORK -> showPreselected()
                 // Un premier réseau vient d'arriver au catalogue : le choix est proposé tant que rien n'est engagé.
                 step == Step.MODE && existing == null && hasNetworkStep && !hadNetworkStep -> goTo(Step.NETWORK)
                 // L'étape du réseau est apparue ou a disparu : le compte des étapes et le retour changent.
@@ -760,6 +794,8 @@ class ConfigureActivity : Activity() {
     }
 
     private fun findNetwork() {
+        // Demander son réseau, c'est accepter qu'il soit coché à la place de celui qu'on avait touché.
+        networkTouched = false
         if (PositionReader(this).hasAnyAccess) {
             locateNetwork(announce = true)
         } else {
@@ -786,19 +822,47 @@ class ConfigureActivity : Activity() {
                 catalogLoading -> null
                 else -> R.string.network_none_near
             }
-            preselectNearest()
-            renderNetworks()
+            showPreselected()
         }
     }
 
-    /** Le réseau de l'endroit passe devant le dernier choisi, tant que l'usager n'a rien décidé. */
-    private fun preselectNearest() {
-        if (networkTouched || existing != null) return
-        nearestNetwork?.let(catalog::byId)?.let { network = it }
+    /**
+     * Redessine la liste après l'arrivée du catalogue ou de la position. Si le réseau coché vient de
+     * changer, il est en tête : la liste y revient, et une recherche en cours, qui le masquerait,
+     * est effacée.
+     */
+    private fun showPreselected() {
+        val changed = preselectNetwork()
+        if (changed && search.text.isNotEmpty()) search.setText("")
+        renderNetworks(fromTop = changed)
     }
 
+    /**
+     * Le réseau coché d'avance, tant que l'usager n'a rien décidé : celui de l'endroit, sinon le
+     * dernier choisi, que le catalogue vient peut-être seulement de faire connaître. Renvoie vrai si
+     * le réseau coché a changé.
+     */
+    private fun preselectNetwork(): Boolean {
+        if (networkTouched || existing != null) return false
+        val wanted = nearestNetwork?.let(catalog::byId)
+            ?: prefs.lastNetwork?.let(catalog::byId)?.takeIf { it.status != NetworkStatus.OFF }
+            ?: return false
+        val changed = wanted.id != network.id
+        network = wanted
+        return changed
+    }
+
+    /** Le réseau coché, s'il est à l'écran : une recherche peut le masquer, et rien ne se valide sans être vu. */
+    private fun checkedNetworkShown(): Network? =
+        RowSearch.filter(adapter.items, search.text.toString()).firstOrNull { it.checked }?.payload as? Network
+
     private fun confirmNetwork() {
-        network = adapter.items.firstOrNull { it.checked }?.payload as? Network ?: return
+        val chosen = checkedNetworkShown()
+        if (chosen == null) {
+            Toast.makeText(this, R.string.network_pick_one, Toast.LENGTH_LONG).show()
+            return
+        }
+        network = chosen
         // Continuer est une décision : la position, si elle arrive après, ne la défait pas.
         networkTouched = true
         goTo(Step.MODE)
@@ -1154,7 +1218,7 @@ class ConfigureActivity : Activity() {
                         adapter.setItems(leading + items)
                         showList()
                     }
-                    applySearch(search.text.toString())
+                    updateEmptyText()
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -1195,7 +1259,7 @@ class ConfigureActivity : Activity() {
                 } else {
                     adapter.setItems(stops.map { s -> RowItem(title = s.name, subtitle = s.town, chevron = true, payload = s) })
                     showList()
-                    applySearch(search.text.toString())
+                    updateEmptyText()
                 }
             } catch (e: CancellationException) {
                 throw e
@@ -1314,7 +1378,8 @@ class ConfigureActivity : Activity() {
      */
     private fun updateSaveEnabled() {
         save.isEnabled = true
-        save.alpha = if (adapter.items.any { it.checked }) 1f else DISABLED_ALPHA
+        val chosen = if (step == Step.NETWORK) checkedNetworkShown() != null else adapter.items.any { it.checked }
+        save.alpha = if (chosen) 1f else DISABLED_ALPHA
     }
 
     /** La configuration en cours de réglage ; sans sens coché, tous les sens. */
