@@ -1218,6 +1218,8 @@ class ConfigureActivity : Activity() {
                             title = UiText.lineTitle(l),
                             subtitle = lineSubtitle(l),
                             badge = l,
+                            // Grisée mais à portée : on la choisit en connaissance de cause.
+                            dimmed = !l.realtime,
                             searchExtra = "${l.shortName} ${l.name}",
                             payload = l,
                         )

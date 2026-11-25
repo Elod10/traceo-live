@@ -8,6 +8,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
+import java.io.DataOutputStream
 import java.io.File
 
 class StopIndexTest {
@@ -145,6 +146,78 @@ class StopIndexTest {
             assertNull(StopIndexStore(broken).around(48.8, 2.3, 100))
         } finally {
             broken.delete()
+        }
+    }
+
+    // --- Lignes sans temps réel (Q11 de Tracéo) -------------------------------------------------
+
+    /** Un fichier de la version 1, d'avant `realtime` : une ligne, un quai. */
+    private fun versionOne(savedAt: Long): ByteArray {
+        val out = ByteArrayOutputStream()
+        val data = DataOutputStream(out)
+        data.writeInt(0x54524958)
+        data.writeInt(1)
+        data.writeLong(savedAt)
+        data.writeInt(1)
+        listOf("2B", "Bréviandes - Voves", "2B", "bus", "", "", "", "F29400", "FFFFFF").forEach(data::writeUTF)
+        data.writeInt(1)
+        val payload = ByteArrayOutputStream()
+        DataOutputStream(payload).apply {
+            writeUTF("Acacias")
+            writeUTF("")
+            writeUTF("1:ACACI")
+            writeShort(1)
+            writeShort(0)
+            flush()
+        }
+        data.writeInt(4_829_731)
+        data.writeInt(407_412)
+        data.writeShort(payload.size())
+        payload.writeTo(data)
+        data.flush()
+        return out.toByteArray()
+    }
+
+    @Test
+    fun theLinesWithoutRealtimeAreKeptInTheFile() {
+        val cable = Line("C", "Téléphérique", "C", "cableway", networkId = "brest", realtime = false)
+        val tram = Line("A", "Tram A", "A", "tram", networkId = "brest")
+        val out = ByteArrayOutputStream()
+        StopIndexFile.write(out, 5L, listOf(cable, tram), listOf(IndexedStop("Capucins", null, 48.38, -4.50, "CAP", listOf("C", "A"))))
+        val bytes = out.toByteArray()
+
+        assertTrue(StopIndexFile.header(ByteArrayInputStream(bytes))!!.knowsRealtime)
+        val area = StopIndexFile.all(ByteArrayInputStream(bytes), "brest")
+        assertFalse(area.lines.getValue("C").realtime)
+        assertTrue(area.lines.getValue("A").realtime)
+        assertEquals(listOf("C", "A"), area.stops.single().lineIds)
+    }
+
+    @Test
+    fun aFileOfTheFirstVersionIsStillReadWithRealtimeEverywhere() {
+        val bytes = versionOne(1234L)
+        val header = StopIndexFile.header(ByteArrayInputStream(bytes))!!
+        assertEquals(1234L, header.savedAt)
+        assertFalse(header.knowsRealtime)
+        assertEquals(1234L, StopIndexFile.savedAt(ByteArrayInputStream(bytes)))
+
+        val area = StopIndexFile.around(ByteArrayInputStream(bytes), 48.2973, 4.0741, 100, "troyes")
+        assertEquals(listOf("1:ACACI"), area.stops.map { it.zone })
+        assertTrue(area.lines.getValue("2B").realtime)
+    }
+
+    @Test
+    fun anIndexFromTraceoWithoutRealtimeIsReloadedOnce() {
+        val file = File.createTempFile("index", ".bin")
+        try {
+            file.writeBytes(versionOne(1234L))
+            assertEquals(1234L, StopIndexStore(file, "troyes").savedAt())
+            assertTrue(StopIndexStore(file, "troyes").isOutdated(1000L))
+            assertTrue(StopIndexStore(file, "troyes").isOutdated(null))
+            // Celui de l'Île-de-France, que le téléphone construit, n'a que des lignes à temps réel.
+            assertFalse(StopIndexStore(file).isOutdated(1000L))
+        } finally {
+            file.delete()
         }
     }
 }

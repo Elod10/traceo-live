@@ -94,7 +94,7 @@ Le contrat qui fait foi est celui que Tracéo documente : routes 79 à 83 de son
 | Point | Contrat v0 du pilote | Servi par Tracéo |
 |---|---|---|
 | Identifiant de ligne | Exemple « 2B » | Le `route_id` du réseau : « 204 » pour la ligne dont le `code` est « 2B » |
-| `realtime` | Facultatif | Jamais servi pour l'instant |
+| `realtime` | Facultatif | Servi pour les réseaux mesurés depuis MR1 (Q11), routes 80 et 83 ; absent pour un réseau non mesuré (Troyes) |
 | `attribution.text` | Exemple court | La mention complète : « Contient des informations du jeu … » |
 | Réseau jamais relevé | Non décrit | `fetchedAt` et `ageSec` nuls, `fresh` faux, `nextAt` à l'heure du réveil, quelques secondes plus tard |
 | Réseau coupé | `status` à `off` | En plus : ses routes répondent 503 et `nextAt` est nul |
@@ -460,12 +460,42 @@ franciliens : passages, couleurs et réveil conformes. Trois remarques de l'util
   des passages du Câble C1 et du funiculaire de Montmartre.
 - **Le Métro de Rouen.** Techniquement un tramway, mais le réseau le déclare métro dans ses
   horaires (`route_type` 1) et tout le monde l'appelle « le Métro ». L'appli suit le mode servi ;
-  le changer serait une surcharge par ligne dans le registre de Tracéo. À trancher par l'utilisateur.
+  le changer serait une surcharge par ligne dans le registre de Tracéo. Tranché le 24 novembre :
+  il reste « Métro ».
+
+### Lignes sans temps réel (Q11, 25 novembre 2026)
+
+Tracéo sert Q11 en préproduction depuis le 25 novembre, après sa mesure finale sur une
+capture de 26,9 heures. Huit réseaux sur neuf portent `realtime` sur chaque ligne, routes 80 et 83 ;
+Troyes, pas encore mesuré, ne l'a pas (absent veut dire « on ne sait pas », lu comme vrai). Un mode
+dont aucune ligne n'a de temps réel sort de `modes` : plus de téléphérique à Brest ni à Toulon, plus
+de bateau à Rouen. Tours sort du registre : un widget posé dessus reçoit « Réseau inconnu », comme
+`tcat`.
+
+- **Le menu des modes** suit `modes` du catalogue, rien à changer : Brest propose Tramway et Bus,
+  Toulon Bus et Bateau, Rouen Métro et Bus.
+- **La liste des lignes** d'un mode montre toujours les lignes sans temps réel, grisées, avec
+  « Sans temps réel » en sous-titre ; on peut encore les choisir, l'étape des sens le redit. Elles
+  sont nombreuses à Rouen (73 sur 112) et à Toulon (47 sur 97).
+- **L'index des arrêts garde `realtime`.** Le fichier de l'index passe en version 2 : un octet par
+  ligne. Un fichier de la version 1 reste lisible, toutes ses lignes avec du temps réel ; celui
+  d'un autre réseau est retéléchargé une fois, celui de l'Île-de-France est gardé.
+- **À proximité ne classe pas une ligne sans temps réel**, même choisie à cet endroit ou favorite :
+  elle n'aurait jamais de passage, et prendrait la place d'une ligne qui en a. Sans cela, à l'arrêt
+  Isaac Newton de Rouen, le format À proximité aurait interrogé sept lignes sans temps réel sur
+  huit ; il ne garde que la F5. L'arrêt le plus proche se compte parmi les lignes qui restent : au
+  pied du téléphérique de Brest, ce sont les bus à 79 m.
+- **Vérifié contre la préproduction** par le client de l'appli : catalogue, menus des modes, lignes
+  et index des neuf réseaux (`realtime` égal entre les routes 80 et 83), classement autour d'un
+  quai sans temps réel à Brest, Toulon et Rouen, 404 `network` pour Tours.
+- **Limite connue** : un widget posé à la main garde le `realtime` de sa ligne au moment de la
+  configuration. Si une mesure suivante change la liste, il ne le saura qu'une fois refait. Même
+  défaut que pour la couleur ou le nom d'une ligne ; à traiter avec le rattachement du chapitre 12.
 
 ## 11. Questions à Tracéo
 
 Ce qui manquait à l'appli dans le contrat. La brique MR1 (20 novembre 2026) a répondu à toutes,
-sauf Q3, reportée.
+sauf Q3, reportée ; Q10 et Q11 sont venues ensuite.
 
 | | Question | Réponse de Tracéo | Dans l'appli |
 |---|---|---|---|
@@ -478,8 +508,8 @@ sauf Q3, reportée.
 | Q7 | `indexAt` change-t-il à chaque compilation ? | C'était le cas ; corrigé : il ne change qu'avec les lignes, les stations, l'index, l'emprise ou les modes. Pas encore observé sur plusieurs jours | Rien à changer |
 | Q8 | La date de mise à jour du jeu de données | Fait : `attribution.updatedAt`, ou `null` | Écran des sources (lot 13) |
 | Q9 | `attribution.text` commence-t-il toujours par « Contient des informations » ? | Garanti | Rien à changer |
-| Q10 | Le statut du réseau dans la réponse des passages, pour qu'un widget sache que le temps réel est interrompu sans relire le catalogue | Fait le 20 novembre au soir, pas encore en préproduction : `status`, `ok` ou `stale`, lu au moment de la réponse ; celui du dernier relevé pendant un réveil | Lu (lot 13) : « Temps réel interrompu sur ce réseau » |
-| Q11 | Une ligne qui n'est jamais dans le flux : `realtime` faux, et son mode retiré de `modes` si aucune de ses lignes n'a de temps réel | À poser (Toulon T, Brest C, Rouen Calypso, d'après la capture du 20/11) | Elle propose aujourd'hui leur mode, qui ne mène qu'à « Aucun passage » |
+| Q10 | Le statut du réseau dans la réponse des passages, pour qu'un widget sache que le temps réel est interrompu sans relire le catalogue | Fait, en préproduction depuis le 20 novembre : `status`, `ok` ou `stale`, lu au moment de la réponse ; celui du dernier relevé pendant un réveil | Lu (lot 13) : « Temps réel interrompu sur ce réseau » |
+| Q11 | Une ligne qui n'est jamais dans le flux : `realtime` faux, et son mode retiré de `modes` si aucune de ses lignes n'a de temps réel | Fait, en préproduction depuis le 25 novembre : liste statique par réseau mesuré, datée au registre ; champ absent pour un réseau non mesuré | Lignes grisées à la configuration, gardées dans l'index, jamais classées par À proximité (lot 13) |
 
 ## 12. Proposition : rattacher un widget après un changement d'identifiants
 
