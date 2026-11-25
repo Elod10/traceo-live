@@ -66,6 +66,12 @@
                         android:layout_height="wrap_content"
                         android:layout_marginTop="2dp" />
                 </LinearLayout>
+                <!-- Une source par autre réseau des widgets posés (item_source_network). -->
+                <LinearLayout
+                    android:id="@+id/other_sources"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:orientation="vertical" />
 
                 <View
                     android:layout_width="match_parent"

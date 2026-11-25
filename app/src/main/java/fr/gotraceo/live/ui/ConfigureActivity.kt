@@ -322,6 +322,13 @@ class ConfigureActivity : Activity() {
      */
     private val hasNetworkStep: Boolean get() = catalog.others.isNotEmpty() || catalog.savedAt == 0L
 
+    /**
+     * Le seul mode du réseau, quand il n'en propose qu'un (Troyes : le bus). L'étape du mode n'a alors
+     * rien à faire choisir : la configuration passe directement aux lignes, qui reprennent en tête
+     * l'option automatique et « Garder la ligne et l'arrêt actuels ».
+     */
+    private val onlyMode: TransportMode? get() = DataSources.onlyMode(network, prefs.hasApiKey)
+
     private fun bindViews() {
         stepBar = findViewById(R.id.step_bar)
         stepCount = findViewById(R.id.step_count)
@@ -407,6 +414,12 @@ class ConfigureActivity : Activity() {
     // --- Navigation ------------------------------------------------------------------------
 
     private fun goTo(target: Step, forceRefresh: Boolean = false) {
+        // Un réseau d'un seul mode n'a pas d'étape du mode : ses lignes en tiennent lieu.
+        val only = onlyMode
+        if (target == Step.MODE && only != null) {
+            mode = only
+            return goTo(Step.LINE, forceRefresh)
+        }
         loadJob?.cancel()
         step = target
         updateBackCallback()
@@ -430,12 +443,18 @@ class ConfigureActivity : Activity() {
         when (step) {
             Step.DIRECTION -> goTo(if (viaShortcut) Step.MODE else Step.STOP)
             Step.STOP -> goTo(Step.LINE)
-            Step.LINE -> goTo(Step.MODE)
+            Step.LINE -> if (onlyMode == null) goTo(Step.MODE) else backFromFirstChoice()
             Step.AUTO_COLOR -> goTo(Step.AUTO)
+            // Sans étape du mode, goTo(MODE) ramène aux lignes, où se trouve l'option automatique.
             Step.AUTO -> if (isProximity) finish() else goTo(Step.MODE)
-            Step.MODE -> if (hasNetworkStep) goTo(Step.NETWORK) else finish()
+            Step.MODE -> backFromFirstChoice()
             Step.NETWORK -> finish()
         }
+    }
+
+    /** Retour depuis le premier choix après le réseau (mode, ou lignes d'un réseau d'un seul mode). */
+    private fun backFromFirstChoice() {
+        if (hasNetworkStep) goTo(Step.NETWORK) else finish()
     }
 
     /** Vrai si le retour change d'étape au lieu de fermer l'écran. */
@@ -443,6 +462,7 @@ class ConfigureActivity : Activity() {
         get() = when (step) {
             Step.NETWORK -> false
             Step.MODE -> hasNetworkStep
+            Step.LINE -> onlyMode == null || hasNetworkStep
             Step.AUTO -> !isProximity
             else -> true
         }
@@ -471,22 +491,29 @@ class ConfigureActivity : Activity() {
     @Deprecated("Deprecated in Java")
     override fun onBackPressed() = navigateBack()
 
-    private fun updateChrome() {
-        // Avec l'étape du réseau, les suivantes sont décalées d'un rang.
-        val shift = if (hasNetworkStep) 1 else 0
-        val (index, label) = when (step) {
-            Step.NETWORK -> 1 to getString(R.string.step_network)
-            Step.MODE -> 1 + shift to getString(R.string.step_mode)
-            Step.LINE -> 2 + shift to getString(R.string.step_line)
-            Step.STOP -> 3 + shift to getString(R.string.step_stop)
-            Step.DIRECTION -> 4 + shift to getString(R.string.step_direction)
-            Step.AUTO -> 0 to getString(if (isProximity) R.string.widget_proximite_name else R.string.step_auto)
-            Step.AUTO_COLOR -> 0 to getString(R.string.step_direction)
+    /**
+     * Rang de l'étape et nombre d'étapes (0 hors du parcours, en automatique). L'étape du réseau en
+     * ajoute une ; un réseau d'un seul mode en retire une, celle du mode : le compte suit le réseau coché.
+     */
+    private fun stepPosition(): Pair<Int, Int> {
+        val withNetwork = if (hasNetworkStep) 1 else 0
+        val shift = withNetwork - (if (onlyMode != null) 1 else 0)
+        val index = when (step) {
+            Step.NETWORK -> 1
+            Step.MODE -> 1 + withNetwork
+            Step.LINE -> 2 + shift
+            Step.STOP -> 3 + shift
+            Step.DIRECTION -> 4 + shift
+            Step.AUTO, Step.AUTO_COLOR -> 0
         }
-        val total = 4 + shift
-        title = if (index == 0) label else getString(R.string.step_counter, index, total, label)
-        stepTitle.text = label
+        return index to 4 + shift
+    }
 
+    /** Barre des étapes et titre de la fenêtre, redessinés aussi quand le réseau coché change. */
+    private fun updateStepCounter() {
+        val (index, total) = stepPosition()
+        val label = stepTitle.text.toString()
+        title = if (index == 0) label else getString(R.string.step_counter, index, total, label)
         val inSteps = index > 0
         stepBar.visibility = if (inSteps) View.VISIBLE else View.GONE
         stepCount.visibility = if (inSteps) View.VISIBLE else View.GONE
@@ -495,6 +522,21 @@ class ConfigureActivity : Activity() {
             segment.visibility = if (i < total) View.VISIBLE else View.GONE
             segment.setBackgroundResource(if (i < index) R.drawable.bg_step_on else R.drawable.bg_step_off)
         }
+    }
+
+    private fun updateChrome() {
+        stepTitle.text = getString(
+            when (step) {
+                Step.NETWORK -> R.string.step_network
+                Step.MODE -> R.string.step_mode
+                Step.LINE -> R.string.step_line
+                Step.STOP -> R.string.step_stop
+                Step.DIRECTION, Step.AUTO_COLOR -> R.string.step_direction
+                Step.AUTO -> if (isProximity) R.string.widget_proximite_name else R.string.step_auto
+            },
+        )
+        updateStepCounter()
+        val inSteps = stepPosition().first > 0
         overline.visibility = if (!inSteps && !isProximity) View.VISIBLE else View.GONE
 
         // Le fil d'Ariane rappelle les choix faits ; le réseau n'y figure que s'il a été choisi.
@@ -657,6 +699,9 @@ class ConfigureActivity : Activity() {
         )
         stepHelp.visibility = View.VISIBLE
         updateSaveEnabled()
+        // La position ou le catalogue ont pu cocher un autre réseau.
+        updateStepCounter()
+        bindMention()
     }
 
     /** Nom du réseau, son état s'il est dégradé, et ce qui le distingue pour cet usager. */
@@ -761,8 +806,11 @@ class ConfigureActivity : Activity() {
 
     // --- Mode -------------------------------------------------------------------------------
 
-    private fun showModes() {
-        val hasKey = prefs.hasApiKey
+    /**
+     * L'option automatique, puis « Garder la ligne et l'arrêt actuels » quand c'est possible : en tête
+     * de l'étape du mode, ou des lignes d'un réseau d'un seul mode.
+     */
+    private fun leadingRows(): List<RowItem> {
         val items = ArrayList<RowItem>()
         items += RowItem(
             title = getString(R.string.auto_row),
@@ -773,7 +821,9 @@ class ConfigureActivity : Activity() {
         )
         // Un arrêt choisi avec une clé retirée depuis n'existe pas chez Tracéo : impossible de le garder.
         // Un arrêt d'un autre réseau que celui qui vient d'être choisi non plus.
-        val keepable = existing?.takeIf { !it.auto && it.networkId == network.id && DataSources.route(it, hasKey) != PassageRoute.RECONFIGURE }
+        val keepable = existing?.takeIf {
+            !it.auto && it.networkId == network.id && DataSources.route(it, prefs.hasApiKey) != PassageRoute.RECONFIGURE
+        }
         keepable?.let { cfg ->
             items += RowItem(
                 title = getString(R.string.keep_current),
@@ -783,6 +833,12 @@ class ConfigureActivity : Activity() {
                 payload = cfg,
             )
         }
+        return items
+    }
+
+    private fun showModes() {
+        val hasKey = prefs.hasApiKey
+        val items = ArrayList<RowItem>(leadingRows())
         val modes = DataSources.modes(network, hasKey)
         modes.forEachIndexed { index, m ->
             items += RowItem(
@@ -818,16 +874,13 @@ class ConfigureActivity : Activity() {
                     adapter.items.forEach { if (it.radio) it.checked = it === item }
                     adapter.notifyDataSetChanged()
                     updateSaveEnabled()
+                    // Le compte des étapes et la mention suivent le réseau coché.
+                    updateStepCounter()
+                    bindMention()
                 }
             }
             Step.MODE -> when (val payload = item.payload) {
-                is WidgetConfig -> {
-                    mode = payload.mode
-                    line = payload.line
-                    stop = payload.stop
-                    viaShortcut = true
-                    goTo(Step.DIRECTION)
-                }
+                is WidgetConfig -> keepCurrent(payload)
                 is TransportMode -> {
                     mode = payload
                     line = null
@@ -836,17 +889,18 @@ class ConfigureActivity : Activity() {
                     goTo(Step.LINE)
                 }
                 KeyRow -> startActivity(Intent(this, KeyActivity::class.java))
-                AutoRow -> {
-                    mode = null
-                    line = null
-                    stop = null
-                    goTo(Step.AUTO)
-                }
+                AutoRow -> chooseAuto()
             }
-            Step.LINE -> (item.payload as? Line)?.let {
-                line = it
-                stop = null
-                goTo(Step.STOP)
+            // Sans étape du mode, les lignes portent aussi l'option automatique et « Garder ».
+            Step.LINE -> when (val payload = item.payload) {
+                is Line -> {
+                    line = payload
+                    stop = null
+                    viaShortcut = false
+                    goTo(Step.STOP)
+                }
+                is WidgetConfig -> keepCurrent(payload)
+                AutoRow -> chooseAuto()
             }
             Step.STOP -> (item.payload as? Stop)?.let {
                 stop = it
@@ -860,6 +914,22 @@ class ConfigureActivity : Activity() {
             }
             Step.AUTO_COLOR -> Unit
         }
+    }
+
+    /** Garde la ligne et l'arrêt du widget : seuls le sens et la couleur restent à régler. */
+    private fun keepCurrent(cfg: WidgetConfig) {
+        mode = cfg.mode
+        line = cfg.line
+        stop = cfg.stop
+        viaShortcut = true
+        goTo(Step.DIRECTION)
+    }
+
+    private fun chooseAuto() {
+        mode = null
+        line = null
+        stop = null
+        goTo(Step.AUTO)
     }
 
     // --- Mode automatique ------------------------------------------------------------------------
@@ -1074,11 +1144,14 @@ class ConfigureActivity : Activity() {
                             payload = l,
                         )
                     }
-                    if (fitsGrid(lines)) {
+                    // Sans étape du mode, l'option automatique et « Garder » passent en tête des lignes ;
+                    // la grille, faite de pastilles seules, ne saurait pas les montrer.
+                    val leading = if (onlyMode != null) leadingRows() else emptyList()
+                    if (leading.isEmpty() && fitsGrid(lines)) {
                         gridAdapter.setItems(items)
                         showGrid()
                     } else {
-                        adapter.setItems(items)
+                        adapter.setItems(leading + items)
                         showList()
                     }
                     applySearch(search.text.toString())

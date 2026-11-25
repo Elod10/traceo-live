@@ -79,7 +79,15 @@
     <string name="main_source_traceo_detail">Sans clé : le relevé change environ toutes les 2 minutes et la voie n\'est pas disponible.</string>
     <string name="main_source_prim">PRIM en direct</string>
     <string name="main_source_prim_detail">Clé enregistrée : les widgets affichent la voie quand elle est connue et peuvent s\'actualiser chaque minute.</string>
-    <string name="settings_source_networks">%1$s : toujours par le cache de Tracéo, à la cadence de chaque réseau. La clé PRIM ne concerne que l\'Île-de-France.</string>
+    <string name="settings_source_idfm">Île-de-France : %1$s</string>
+    <string name="settings_source_network">%1$s : %2$s via Tracéo</string>
+    <string name="settings_source_network_city">%1$s : via Tracéo</string>
+    <string name="settings_source_network_every_minute">Relevé chaque minute environ, sans la voie.</string>
+    <string name="settings_source_network_every_n">Relevé toutes les %1$d minutes environ, sans la voie.</string>
+    <string name="settings_keys_add">Ajouter une clé API</string>
+    <string name="settings_keys_add_sub">Facultatif : interroger un réseau directement</string>
+    <string name="settings_keys_edit">Clés API</string>
+    <string name="settings_keys_usage">Île-de-France : %1$s</string>
     <string name="settings_key_add">Ajouter une clé API PRIM</string>
     <string name="settings_key_edit">Clé API PRIM</string>
     <string name="settings_key_add_sub">Facultatif : la voie, le câble et le funiculaire</string>
@@ -104,6 +112,14 @@
 
     <!-- Clé API -->
     <string name="main_key_title">Clé API PRIM</string>
+    <string name="key_networks_title">Clé API</string>
+    <string name="key_networks_help">Facultative. Avec une clé personnelle, votre téléphone interroge le réseau directement, sans passer par Tracéo. La clé reste sur ce téléphone et n\'est jamais envoyée à Tracéo.</string>
+    <string name="key_networks_label">Choisissez le réseau</string>
+    <string name="key_networks_footer">Seuls les réseaux qui proposent une clé personnelle peuvent en recevoir une.</string>
+    <string name="key_network_idfm_title">Île-de-France · PRIM</string>
+    <string name="key_network_idfm_sub">Ajoute la voie, le câble et le funiculaire, et l\'actualisation chaque minute. Compte gratuit sur le portail PRIM.</string>
+    <string name="key_network_none">Aucune clé enregistrée</string>
+    <string name="key_network_open">Pas de clé à demander : les données de %1$s sont ouvertes, et Tracéo les relève déjà.</string>
     <string name="main_key_help">Facultative. Sans clé, les passages de PRIM passent par Tracéo, qui met ses réponses en cache. Avec une clé, votre téléphone interroge directement PRIM, et les widgets gagnent :</string>
     <string name="key_gain_platform">La voie, quand elle est connue</string>
     <string name="key_gain_minute">Une actualisation possible chaque minute</string>
