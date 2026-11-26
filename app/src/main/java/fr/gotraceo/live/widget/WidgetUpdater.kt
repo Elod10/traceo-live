@@ -55,6 +55,7 @@ object WidgetUpdater {
     private const val TAG = "TRWidget"
     private const val MAX_PARALLEL_REQUESTS = 4
     private const val MIN_ALARM_DELAY_MS = 2_000L
+    private const val EARLY_TICK_REQUEST = 1
     private val RENDER_QUALITIES = listOf(1f, 0.7f, 0.5f)
 
     private val mutex = Mutex()
@@ -263,10 +264,11 @@ object WidgetUpdater {
 
     // --- Planification du tick -------------------------------------------------------------
 
-    private fun alarmIntent(context: Context, action: String): PendingIntent {
+    /** @param requestCode distingue deux alarmes de la même action (le tick de la minute et le tick anticipé) */
+    private fun alarmIntent(context: Context, action: String, requestCode: Int = 0): PendingIntent {
         val intent = Intent(context, WidgetActionReceiver::class.java).setAction(action)
         return PendingIntent.getBroadcast(
-            context, 0, intent,
+            context, requestCode, intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
     }
@@ -307,37 +309,44 @@ object WidgetUpdater {
     private fun setAlarms(context: Context) {
         val alarmManager = context.getSystemService(AlarmManager::class.java) ?: return
         val tick = alarmIntent(context, ACTION_TICK)
+        val early = alarmIntent(context, ACTION_TICK, requestCode = EARLY_TICK_REQUEST)
         val watchdog = alarmIntent(context, ACTION_WATCHDOG)
         val ids = widgetIds(context)
         if (ids.isEmpty()) {
             alarmManager.cancel(tick)
+            alarmManager.cancel(early)
             alarmManager.cancel(watchdog)
             return
         }
         val now = System.currentTimeMillis()
         val prefs = Prefs(context)
         val timing = Timing.of(prefs)
-        // Le tick de chaque minute, ou plus tôt si un widget est dû avant (prochain relevé de Tracéo).
+        // Le tick de chaque minute, et un tick anticipé si un widget est dû avant (prochain relevé de Tracéo).
         val nextDue = ids.asList().mapNotNull { timing.dueAt(context, prefs, it) }.filter { it > now }.minOrNull()
-        val trigger = maxOf(
-            now + MIN_ALARM_DELAY_MS,
-            minOf(RefreshSchedule.nextTickAt(now, prefs.refreshOffsetMs), nextDue ?: Long.MAX_VALUE),
-        )
-        // RTC (non réveillant) : rien n'est exécuté tant que l'écran est éteint. « AllowWhileIdle » :
-        // l'économiseur de batterie, y compris celui qu'Android active seul sans le signaler, repousse
-        // sans fin une alarme ordinaire dès que l'appli passe en arrière-plan, et les widgets se
-        // figent jusqu'à ce qu'on l'ouvre. Celle-ci n'est que limitée à un quota horaire, qu'un tick
-        // par minute ne dépasse pas. Écran éteint, le tick ne fait aucune requête (cf. refresh).
+        val minuteTrigger = maxOf(now + MIN_ALARM_DELAY_MS, RefreshSchedule.nextTickAt(now, prefs.refreshOffsetMs))
+        val earlyTrigger = nextDue?.let { maxOf(now + MIN_ALARM_DELAY_MS, it) }?.takeIf { it < minuteTrigger }
+        // RTC (non réveillant) : rien n'est exécuté tant que l'écran est éteint. Le tick de la minute est
+        // « AllowWhileIdle » : l'économiseur de batterie, y compris celui qu'Android active seul sans le
+        // signaler, repousse sans fin une alarme ordinaire dès que l'appli passe en arrière-plan, et les
+        // widgets se figeaient jusqu'à ce qu'on l'ouvre. Celle-ci n'est que limitée à un quota horaire
+        // (72 sur un Pixel), qu'un tick par minute ne dépasse pas. Le tick anticipé reste une alarme
+        // ordinaire : compté dans ce quota, il l'épuiserait en une demi-heure et figerait les widgets le
+        // reste de l'heure ; sous l'économiseur, il attend, et le tick de la minute fait le travail.
+        // Écran éteint, aucun tick ne fait de requête (cf. refresh).
         try {
             if (canUseExactAlarms(alarmManager)) {
-                alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC, trigger, tick)
+                alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC, minuteTrigger, tick)
+                if (earlyTrigger != null) alarmManager.setExact(AlarmManager.RTC, earlyTrigger, early)
             } else {
-                alarmManager.setAndAllowWhileIdle(AlarmManager.RTC, trigger, tick)
+                alarmManager.setAndAllowWhileIdle(AlarmManager.RTC, minuteTrigger, tick)
+                if (earlyTrigger != null) alarmManager.set(AlarmManager.RTC, earlyTrigger, early)
             }
         } catch (e: SecurityException) {
             Log.w(TAG, "Alarme exacte refusée", e)
-            alarmManager.setAndAllowWhileIdle(AlarmManager.RTC, trigger, tick)
+            alarmManager.setAndAllowWhileIdle(AlarmManager.RTC, minuteTrigger, tick)
+            if (earlyTrigger != null) alarmManager.set(AlarmManager.RTC, earlyTrigger, early)
         }
+        if (earlyTrigger == null) alarmManager.cancel(early)
         // Filet de sécurité, repoussé à chaque appel : il ne part que si plus rien ne passe ici.
         alarmManager.setInexactRepeating(
             AlarmManager.RTC,
