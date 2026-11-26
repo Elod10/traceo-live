@@ -58,6 +58,40 @@
                     android:layout_marginBottom="16dp"
                     android:text="@string/main_widgets_title" />
 
+                <!-- Données en arrière-plan coupées (réglage de l'appli ou économiseur de données) :
+                     les widgets ne peuvent pas s'actualiser seuls. -->
+                <LinearLayout
+                    android:id="@+id/background_data_card"
+                    android:layout_width="match_parent"
+                    android:layout_height="wrap_content"
+                    android:layout_marginStart="@dimen/screen_padding"
+                    android:layout_marginEnd="@dimen/screen_padding"
+                    android:layout_marginBottom="16dp"
+                    android:background="@drawable/bg_card"
+                    android:orientation="vertical"
+                    android:padding="@dimen/card_padding"
+                    android:visibility="gone">
+
+                    <TextView
+                        style="@style/Text.RowTitle"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:text="@string/background_data_title" />
+
+                    <TextView
+                        style="@style/Text.Help"
+                        android:layout_width="match_parent"
+                        android:layout_height="wrap_content"
+                        android:layout_marginTop="4dp"
+                        android:text="@string/background_data_body" />
+
+                    <Button
+                        android:id="@+id/background_data_allow"
+                        style="@style/ActionPrimary.Small"
+                        android:layout_marginTop="12dp"
+                        android:text="@string/background_data_allow" />
+                </LinearLayout>
+
                 <!-- Android 14 et plus : l'alarme exacte doit être autorisée par l'usager. -->
                 <LinearLayout
                     android:id="@+id/exact_alarm_card"
