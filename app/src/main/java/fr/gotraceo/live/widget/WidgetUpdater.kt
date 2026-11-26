@@ -323,16 +323,20 @@ object WidgetUpdater {
             now + MIN_ALARM_DELAY_MS,
             minOf(RefreshSchedule.nextTickAt(now, prefs.refreshOffsetMs), nextDue ?: Long.MAX_VALUE),
         )
-        // RTC (non réveillant) : rien n'est exécuté tant que l'écran est éteint.
+        // RTC (non réveillant) : rien n'est exécuté tant que l'écran est éteint. « AllowWhileIdle » :
+        // l'économiseur de batterie, y compris celui qu'Android active seul sans le signaler, repousse
+        // sans fin une alarme ordinaire dès que l'appli passe en arrière-plan, et les widgets se
+        // figent jusqu'à ce qu'on l'ouvre. Celle-ci n'est que limitée à un quota horaire, qu'un tick
+        // par minute ne dépasse pas. Écran éteint, le tick ne fait aucune requête (cf. refresh).
         try {
             if (canUseExactAlarms(alarmManager)) {
-                alarmManager.setExact(AlarmManager.RTC, trigger, tick)
+                alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC, trigger, tick)
             } else {
-                alarmManager.set(AlarmManager.RTC, trigger, tick)
+                alarmManager.setAndAllowWhileIdle(AlarmManager.RTC, trigger, tick)
             }
         } catch (e: SecurityException) {
             Log.w(TAG, "Alarme exacte refusée", e)
-            alarmManager.set(AlarmManager.RTC, trigger, tick)
+            alarmManager.setAndAllowWhileIdle(AlarmManager.RTC, trigger, tick)
         }
         // Filet de sécurité, repoussé à chaque appel : il ne part que si plus rien ne passe ici.
         alarmManager.setInexactRepeating(
