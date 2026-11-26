@@ -5,6 +5,7 @@ import android.app.PendingIntent
 import android.appwidget.AppWidgetManager
 import android.content.Context
 import android.content.Intent
+import android.net.ConnectivityManager
 import android.os.Build
 import android.os.PowerManager
 import android.util.Log
@@ -58,6 +59,7 @@ object WidgetUpdater {
     private const val TAG = "TRWidget"
     private const val MAX_PARALLEL_REQUESTS = 4
     private const val MIN_ALARM_DELAY_MS = 2_000L
+    private const val EARLY_TICK_REQUEST = 1
     private val RENDER_QUALITIES = listOf(1f, 0.7f, 0.5f)
 
     private val mutex = Mutex()
@@ -339,10 +341,11 @@ object WidgetUpdater {
 
     // --- Planification du tick -------------------------------------------------------------
 
-    private fun alarmIntent(context: Context, action: String): PendingIntent {
+    /** @param requestCode distingue deux alarmes de la même action (le tick de la minute et le tick anticipé) */
+    private fun alarmIntent(context: Context, action: String, requestCode: Int = 0): PendingIntent {
         val intent = Intent(context, WidgetActionReceiver::class.java).setAction(action)
         return PendingIntent.getBroadcast(
-            context, 0, intent,
+            context, requestCode, intent,
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
         )
     }
@@ -383,33 +386,44 @@ object WidgetUpdater {
     private fun setAlarms(context: Context) {
         val alarmManager = context.getSystemService(AlarmManager::class.java) ?: return
         val tick = alarmIntent(context, ACTION_TICK)
+        val early = alarmIntent(context, ACTION_TICK, requestCode = EARLY_TICK_REQUEST)
         val watchdog = alarmIntent(context, ACTION_WATCHDOG)
         val ids = widgetIds(context)
         if (ids.isEmpty()) {
             alarmManager.cancel(tick)
+            alarmManager.cancel(early)
             alarmManager.cancel(watchdog)
             return
         }
         val now = System.currentTimeMillis()
         val prefs = Prefs(context)
         val timing = Timing.of(context, prefs)
-        // Le tick de chaque minute, ou plus tôt si un widget est dû avant (prochain relevé de Tracéo).
+        // Le tick de chaque minute, et un tick anticipé si un widget est dû avant (prochain relevé de Tracéo).
         val nextDue = ids.asList().mapNotNull { timing.dueAt(context, it) }.filter { it > now }.minOrNull()
-        val trigger = maxOf(
-            now + MIN_ALARM_DELAY_MS,
-            minOf(RefreshSchedule.nextTickAt(now, prefs.refreshOffsetMs), nextDue ?: Long.MAX_VALUE),
-        )
-        // RTC (non réveillant) : rien n'est exécuté tant que l'écran est éteint.
+        val minuteTrigger = maxOf(now + MIN_ALARM_DELAY_MS, RefreshSchedule.nextTickAt(now, prefs.refreshOffsetMs))
+        val earlyTrigger = nextDue?.let { maxOf(now + MIN_ALARM_DELAY_MS, it) }?.takeIf { it < minuteTrigger }
+        // RTC (non réveillant) : rien n'est exécuté tant que l'écran est éteint. Le tick de la minute est
+        // « AllowWhileIdle » : l'économiseur de batterie, y compris celui qu'Android active seul sans le
+        // signaler, repousse sans fin une alarme ordinaire dès que l'appli passe en arrière-plan, et les
+        // widgets se figeaient jusqu'à ce qu'on l'ouvre. Celle-ci n'est que limitée à un quota horaire
+        // (72 sur un Pixel), qu'un tick par minute ne dépasse pas. Le tick anticipé reste une alarme
+        // ordinaire : compté dans ce quota, il l'épuiserait en une demi-heure et figerait les widgets le
+        // reste de l'heure ; sous l'économiseur, il attend, et le tick de la minute fait le travail.
+        // Écran éteint, aucun tick ne fait de requête (cf. refresh).
         try {
             if (canUseExactAlarms(alarmManager)) {
-                alarmManager.setExact(AlarmManager.RTC, trigger, tick)
+                alarmManager.setExactAndAllowWhileIdle(AlarmManager.RTC, minuteTrigger, tick)
+                if (earlyTrigger != null) alarmManager.setExact(AlarmManager.RTC, earlyTrigger, early)
             } else {
-                alarmManager.set(AlarmManager.RTC, trigger, tick)
+                alarmManager.setAndAllowWhileIdle(AlarmManager.RTC, minuteTrigger, tick)
+                if (earlyTrigger != null) alarmManager.set(AlarmManager.RTC, earlyTrigger, early)
             }
         } catch (e: SecurityException) {
             Log.w(TAG, "Alarme exacte refusée", e)
-            alarmManager.set(AlarmManager.RTC, trigger, tick)
+            alarmManager.setAndAllowWhileIdle(AlarmManager.RTC, minuteTrigger, tick)
+            if (earlyTrigger != null) alarmManager.set(AlarmManager.RTC, earlyTrigger, early)
         }
+        if (earlyTrigger == null) alarmManager.cancel(early)
         // Filet de sécurité, repoussé à chaque appel : il ne part que si plus rien ne passe ici.
         alarmManager.setInexactRepeating(
             AlarmManager.RTC,
@@ -431,6 +445,24 @@ object WidgetUpdater {
         val alarmManager = context.getSystemService(AlarmManager::class.java) ?: return false
         return !canUseExactAlarms(alarmManager)
     }
+
+    /**
+     * Vrai si Android empêche l'appli d'utiliser le réseau en arrière-plan : les widgets ne peuvent
+     * alors pas s'actualiser seuls (la requête du tick échoue dès la résolution DNS). Couvre
+     * l'économiseur de données comme le réglage « Données en arrière-plan » de l'appli désactivé.
+     */
+    fun needsBackgroundDataAccess(context: Context): Boolean {
+        val connectivity = context.getSystemService(ConnectivityManager::class.java) ?: return false
+        return blocksBackgroundData(connectivity.restrictBackgroundStatus)
+    }
+
+    /**
+     * Lecture de [ConnectivityManager.getRestrictBackgroundStatus]. ENABLED vaut pour les deux causes :
+     * réglage de l'appli coupé, ou économiseur de données actif sans exception pour l'appli.
+     * WHITELISTED (économiseur actif, appli exemptée) laisse passer les requêtes.
+     */
+    internal fun blocksBackgroundData(status: Int): Boolean =
+        status == ConnectivityManager.RESTRICT_BACKGROUND_STATUS_ENABLED
 
     /** Demande une actualisation immédiate (depuis l'application). */
     fun requestRefresh(context: Context, widgetId: Int? = null) {
