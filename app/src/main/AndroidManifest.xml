@@ -64,6 +64,11 @@
             android:windowSoftInputMode="adjustResize" />
 
         <activity
+            android:name=".ui.KeyNetworksActivity"
+            android:exported="false"
+            android:label="@string/key_networks_title" />
+
+        <activity
             android:name=".ui.LockScreenActivity"
             android:exported="false"
             android:label="@string/lock_title" />

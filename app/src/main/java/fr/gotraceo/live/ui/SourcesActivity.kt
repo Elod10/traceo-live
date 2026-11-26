@@ -7,13 +7,20 @@ import android.text.method.LinkMovementMethod
 import android.view.View
 import android.widget.TextView
 import fr.gotraceo.live.R
+import fr.gotraceo.live.data.NetworkChoices
+import fr.gotraceo.live.data.NetworkMentions
+import fr.gotraceo.live.data.Networks
 import fr.gotraceo.live.data.Prefs
 import fr.gotraceo.live.widget.AutoMode
+import fr.gotraceo.live.widget.Sources
 import java.text.DateFormat
 import java.util.Date
 import java.util.Locale
 
-/** Sources et licences : les mentions dépendent de la source active. */
+/**
+ * Sources et licences : les mentions dépendent de la source active en Île-de-France, et des autres
+ * réseaux utilisés, dont la source et la licence viennent du catalogue de Tracéo.
+ */
 class SourcesActivity : Activity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -36,6 +43,8 @@ class SourcesActivity : Activity() {
             }
         }
 
+        showNetworks()
+
         val version = try {
             packageManager.getPackageInfo(packageName, 0).versionName
         } catch (e: PackageManager.NameNotFoundException) {
@@ -46,6 +55,38 @@ class SourcesActivity : Activity() {
             versionView.visibility = View.GONE
         } else {
             versionView.text = getString(R.string.sources_version, version)
+        }
+    }
+
+    /** Une entrée par réseau utilisé hors Île-de-France, et ces réseaux nommés là où l'application dit ne dépendre de personne. */
+    private fun showNetworks() {
+        val catalog = Sources.catalog(this).read()
+        // Par ville, comme à la configuration : avec plusieurs réseaux, on y cherche le sien.
+        val networks = Sources.usedNetworks(this)
+            .filter { !Networks.isIdfm(it) }
+            .map { Mentions.network(catalog.byId(it), it) }
+            .sortedWith(NetworkChoices.byCity)
+        if (networks.isEmpty()) return
+
+        findViewById<TextView>(R.id.not_affiliated).text = getString(
+            R.string.sources_not_affiliated_networks,
+            networks.map { NetworkMentions.publisher(it) }.distinct().joinToString(" ; "),
+        )
+        val dates = DateFormat.getDateInstance(DateFormat.LONG, Locale.FRENCH)
+        val paragraphs = networks.joinToString("<br><br>") { network ->
+            // La Licence Ouverte demande la date des données : celle du jeu, sinon celle des horaires compilés.
+            NetworkMentions.paragraph(
+                network,
+                indexDate = network.indexAt?.let { dates.format(Date(it)) },
+                updatedDate = network.attribution?.updatedAt?.let { dates.format(Date(it)) },
+            )
+        }
+        findViewById<TextView>(R.id.networks_about).apply {
+            text = Mentions.html(
+                "<b>" + NetworkMentions.escape(getString(R.string.sources_networks_title)) + "</b><br><br>" + paragraphs,
+            )
+            movementMethod = LinkMovementMethod.getInstance()
+            visibility = View.VISIBLE
         }
     }
 }

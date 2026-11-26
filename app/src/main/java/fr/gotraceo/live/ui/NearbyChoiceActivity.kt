@@ -18,9 +18,11 @@ import android.widget.ImageView
 import android.widget.ListView
 import android.widget.TextView
 import fr.gotraceo.live.R
+import fr.gotraceo.live.data.DataSources
 import fr.gotraceo.live.data.Directions
 import fr.gotraceo.live.data.Line
 import fr.gotraceo.live.data.NearbyLine
+import fr.gotraceo.live.data.NearbyLookup
 import fr.gotraceo.live.data.PassageSnapshot
 import fr.gotraceo.live.data.Prefs
 import fr.gotraceo.live.data.RankedLine
@@ -72,8 +74,8 @@ class NearbyChoiceActivity : Activity() {
         // Le format À proximité affiche plusieurs lignes : aucune n'est « la » ligne affichée.
         val shownLineId = prefs.config(widgetId)?.line?.id.takeUnless { WidgetProviders.isProximity(this, widgetId) }
         adapter = NearbyAdapter(this, prefs.favoriteLines, shownLineId) { row ->
-            val favorite = prefs.toggleFavoriteLine(row.nearby.line.id)
-            adapter.setFavorite(row.nearby.line.id, favorite)
+            val favorite = prefs.toggleFavoriteLine(row.nearby.line.key)
+            adapter.setFavorite(row.nearby.line.key, favorite)
         }
         val list = findViewById<ListView>(R.id.nearby_list)
         list.adapter = adapter
@@ -106,12 +108,16 @@ class NearbyChoiceActivity : Activity() {
                 showStatus(getString(R.string.nearby_empty))
                 return@launch
             }
-            val ranked = withContext(Dispatchers.IO) { AutoMode.ranking(this@NearbyChoiceActivity, point) }?.list.orEmpty()
+            val lookup = withContext(Dispatchers.IO) { AutoMode.lookup(this@NearbyChoiceActivity, point) }
+            val ranked = lookup.rankingOrNull?.list.orEmpty()
             if (ranked.isEmpty()) {
-                showStatus(getString(R.string.nearby_empty))
+                val uncovered = lookup is NearbyLookup.NoNetwork
+                showStatus(getString(if (uncovered) R.string.nearby_no_network else R.string.nearby_empty))
                 return@launch
             }
             status.visibility = View.GONE
+            // Les lignes proposées sont toutes du réseau où l'on se trouve : la mention est la sienne.
+            Mentions.bind(findViewById(R.id.data_mention), listOf(ranked.first().nearby.line.networkId))
             adapter.setRows(ranked.map { Row(it) })
             loadPassages(ranked.take(PASSAGES_SHOWN))
         }
@@ -119,6 +125,7 @@ class NearbyChoiceActivity : Activity() {
 
     /** Seules les premières lignes sont interrogées ; avec une clé, celles d'une même zone partagent une requête. */
     private fun loadPassages(ranked: List<RankedLine>) {
+        // Chaque ligne est demandée au réseau qui est le sien, comme pour le widget À proximité.
         val source = Sources.proximity(this@NearbyChoiceActivity)
         val hasKey = prefs.hasApiKey
         val parallel = Semaphore(MAX_PARALLEL_REQUESTS)
@@ -132,7 +139,9 @@ class NearbyChoiceActivity : Activity() {
 
     private fun nextPassage(snapshot: PassageSnapshot, nearby: NearbyLine, hasKey: Boolean): Passage? {
         val now = System.currentTimeMillis()
-        val departures = if (!hasKey || snapshot.viaTraceo) {
+        // Sans clé, ou en repli d'une clé dont le quota est épuisé, les passages viennent de Tracéo.
+        val viaTraceo = !hasKey || snapshot.viaTraceo
+        val departures = if (DataSources.dropsTerminusArrivals(nearby.line.networkId, viaTraceo)) {
             Directions.withoutTerminusArrivals(snapshot.departures, nearby.stopName)
         } else {
             snapshot.departures
@@ -180,8 +189,8 @@ class NearbyChoiceActivity : Activity() {
             notifyDataSetChanged()
         }
 
-        fun setFavorite(lineId: String, favorite: Boolean) {
-            if (favorite) favorites.add(lineId) else favorites.remove(lineId)
+        fun setFavorite(lineKey: String, favorite: Boolean) {
+            if (favorite) favorites.add(lineKey) else favorites.remove(lineKey)
             notifyDataSetChanged()
         }
 
@@ -212,7 +221,7 @@ class NearbyChoiceActivity : Activity() {
             wait.textSize = if (inMinutes) WAIT_TEXT_SP else WAIT_LABEL_SP
             view.findViewById<View>(R.id.nearby_unit).visibility = if (inMinutes) View.VISIBLE else View.GONE
 
-            val favorite = line.id in favorites
+            val favorite = line.key in favorites
             val star = view.findViewById<ImageButton>(R.id.nearby_star)
             star.setImageResource(if (favorite) R.drawable.ic_star else R.drawable.ic_star_border)
             star.contentDescription = context.getString(
@@ -224,7 +233,8 @@ class NearbyChoiceActivity : Activity() {
         }
 
         private fun badgeFor(line: Line): Bitmap {
-            val key = "${line.mode}|${line.shortName}|${line.color}|${line.textColor}"
+            // La forme de la pastille dépend du réseau : le rond du métro n'existe qu'en Île-de-France.
+            val key = "${line.networkId}|${line.mode}|${line.shortName}|${line.color}|${line.textColor}"
             return badgeCache.get(key) ?: BadgeRenderer.render(context, line, BADGE_DP).also { badgeCache.put(key, it) }
         }
 

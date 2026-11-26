@@ -33,6 +33,11 @@ class PositionReader(context: Context) {
     val hasPreciseAccess: Boolean
         get() = app.checkSelfPermission(Manifest.permission.ACCESS_FINE_LOCATION) == PackageManager.PERMISSION_GRANTED
 
+    /** Vrai si l'usager a accordé la position, exacte ou seulement approximative. */
+    val hasAnyAccess: Boolean
+        get() = hasPreciseAccess ||
+            app.checkSelfPermission(Manifest.permission.ACCESS_COARSE_LOCATION) == PackageManager.PERMISSION_GRANTED
+
     /**
      * Vrai si la position peut être lue sans toucher le widget : permission « Toujours autoriser »,
      * facultative. Avant Android 10, la permission de position suffit.
@@ -78,6 +83,41 @@ class PositionReader(context: Context) {
         }
         val found = synchronized(lock) { best }
         return (found ?: recent(lm, enabled, FALLBACK_AGE_MS, Float.MAX_VALUE))?.toFix()
+    }
+
+    /**
+     * Position à quelques kilomètres près, pour reconnaître la ville où l'on est : la permission de
+     * position approximative suffit. La dernière position connue sert si elle est récente ; sinon le
+     * réseau est interrogé, le premier résultat suffit.
+     */
+    @SuppressLint("MissingPermission")
+    suspend fun readApproximate(timeoutMs: Long = APPROXIMATE_TIMEOUT_MS): PositionFix? {
+        val lm = manager ?: return null
+        if (!hasAnyAccess) return null
+        val enabled = try {
+            lm.getProviders(true)
+        } catch (e: SecurityException) {
+            return null
+        }
+        recent(lm, enabled, APPROXIMATE_AGE_MS, Float.MAX_VALUE)?.let { return it.toFix() }
+
+        // Sans la position exacte, d'anciennes versions d'Android refusent le GPS : le réseau suffit ici.
+        val providers = listOf(FUSED_PROVIDER, LocationManager.NETWORK_PROVIDER).filter { it in enabled }
+        val finished = CompletableDeferred<Location?>()
+        val pending = AtomicInteger(providers.size)
+        val offer = { location: Location? ->
+            if (location != null) finished.complete(location)
+            if (pending.decrementAndGet() <= 0) finished.complete(null)
+        }
+        // Un refus pendant la demande est traité par request(), qui répond alors null.
+        val stops = providers.map { request(lm, it, offer) }
+        if (providers.isEmpty()) finished.complete(null)
+        val found = try {
+            withTimeoutOrNull(timeoutMs) { finished.await() }
+        } finally {
+            stops.forEach { it() }
+        }
+        return (found ?: recent(lm, enabled, APPROXIMATE_FALLBACK_AGE_MS, Float.MAX_VALUE))?.toFix()
     }
 
     /** Lance une demande de position et renvoie de quoi l'arrêter. */
@@ -135,6 +175,8 @@ class PositionReader(context: Context) {
             } catch (e: IllegalArgumentException) {
                 null
             } catch (e: SecurityException) {
+                // Fournisseur réservé à la position exacte, quand seule l'approximative est accordée,
+                // ou permission retirée pendant la lecture.
                 null
             }
         }
@@ -155,6 +197,13 @@ class PositionReader(context: Context) {
 
     companion object {
         const val TIMEOUT_MS = 10_000L
+        const val APPROXIMATE_TIMEOUT_MS = 6_000L
+
+        /** Une ville ne change pas en une heure : une position de cet âge suffit pour la reconnaître. */
+        private const val APPROXIMATE_AGE_MS = 60L * 60 * 1000
+
+        /** Faute de mieux, une position plus ancienne ; au-delà, on a pu changer de ville. */
+        private const val APPROXIMATE_FALLBACK_AGE_MS = 6 * APPROXIMATE_AGE_MS
         private const val FUSED_PROVIDER = "fused"
         private const val GOOD_ACCURACY_M = 100f
         private const val GOOD_AGE_MS = 2L * 60 * 1000

@@ -137,6 +137,22 @@ class ProximityTest {
         assertEquals(listOf("Autre"), kept.entries.single().departures.map { it.destination })
     }
 
+    /** Hors Île-de-France, le serveur a déjà fait le tri : un bus « vers » l'arrêt peut être une boucle. */
+    @Test
+    fun traceoKeepsADestinationNamedLikeTheStopOutsideIleDeFrance() {
+        val elsewhere = NearbyLine(Line("T1", "1", "1", "bus", networkId = "tcat"), "Arrêt 1", "Troyes", "1", 50)
+        val answer = { n: NearbyLine ->
+            Result.success(PassageSnapshot(listOf(dep(2, n.stopName), dep(3, "Autre")), viaTraceo = true))
+        }
+        for (removeTerminus in listOf(false, true)) {
+            val kept = collect(
+                listOf(RankedLine(elsewhere, NearbyReason.NEAREST, 50, false)), rows = 1,
+                removeTerminus = removeTerminus, answer = answer,
+            ).first
+            assertEquals(listOf("Arrêt 1", "Autre"), kept.entries.single().departures.map { it.destination })
+        }
+    }
+
     @Test
     fun onlyAFewPassagesAreStoredPerLine() {
         val (state, _) = collect(listOf(ranked("1")), rows = 1) {
