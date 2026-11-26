@@ -1,8 +1,16 @@
-# Tracéo Live — widget Android de prochains passages en Île-de-France
+# Tracéo Live — widget Android de prochains passages, en Île-de-France et dans d'autres villes
 
 Application Android (APK) fournissant un **widget d'écran d'accueil** qui affiche les prochains
-passages d'une ligne à un arrêt d'Île-de-France. Il fonctionne **sans clé ni compte**. Les passages
-viennent toujours de **PRIM**, la plateforme d'Île-de-France Mobilités, par l'un de ces deux accès :
+passages d'une ligne à un arrêt, en Île-de-France et sur les autres réseaux que sert
+[Tracéo](https://gotraceo.fr). Il fonctionne **sans clé ni compte**.
+
+**Hors Île-de-France**, les lignes, les arrêts et les passages viennent toujours de Tracéo, qui relève
+les horaires et le temps réel que chaque réseau publie en données ouvertes (GTFS et GTFS-RT). La liste
+des réseaux vient du catalogue de Tracéo : un réseau qu'il ajoute apparaît dans l'application sans mise à
+jour. Voir « Autres réseaux » plus bas.
+
+**En Île-de-France**, les passages viennent toujours de **PRIM**, la plateforme d'Île-de-France
+Mobilités, par l'un de ces deux accès :
 
 | | Sans clé (par défaut) | Avec une clé API PRIM |
 |---|---|---|
@@ -12,10 +20,34 @@ viennent toujours de **PRIM**, la plateforme d'Île-de-France Mobilités, par l'
 | Actualisation la plus rapide | 2 minutes | 1 minute |
 | Voie, câble et funiculaire | Non | Oui |
 
+## Autres réseaux
+
+- **Choix du réseau** : c'est la première étape de la configuration. La liste met en tête le réseau du
+  widget, le plus proche et le dernier choisi, puis les villes par ordre alphabétique ; à partir de huit
+  réseaux, une recherche par ville ou par nom de réseau s'y ajoute. « Trouver mon réseau » coche celui de
+  l'endroit avec la position approximative, qui suffit et reste sur le téléphone.
+- **Modes** : ceux que le réseau dessert (métro, tramway, bus, bateau…). Un réseau d'un seul mode saute
+  l'étape du mode.
+- **Lignes sans temps réel** : Tracéo signale les lignes absentes du flux temps réel du réseau. Elles
+  restent proposées, grisées, avec « Sans temps réel » ; l'étape des sens rappelle que le widget n'affichera
+  pas leurs passages. Le mode automatique et le widget À proximité ne les proposent pas.
+- **Réveil d'un réseau** : Tracéo ne relève un réseau que quand on le consulte. Le premier affichage peut
+  donc attendre le premier relevé, quelques secondes ; le widget se remplit ensuite de lui-même.
+- **Temps réel interrompu** : si le flux d'un réseau ne répond plus, le widget l'indique (« Temps réel
+  interrompu sur ce réseau pour le moment ») au lieu d'afficher des passages périmés.
+- **Mode automatique et À proximité** : ils reconnaissent le réseau de l'endroit dans le catalogue, puis
+  cherchent les arrêts proches dans l'index de ce réseau, téléchargé chez Tracéo la première fois. Dans une
+  autre ville, le widget passe au réseau de cette ville.
+- **Source et licence** : chaque widget cite sa source, « Tracéo », ou le réseau quand la place le permet
+  (« Astuce via Tracéo » à Rouen), et l'écran « Sources et
+  licences » donne, pour chaque réseau affiché, son producteur, sa licence et la date de son jeu de données.
+- **Clé API** : seule l'Île-de-France en accepte une. Les autres réseaux passent toujours par Tracéo, sans
+  voie et à la cadence de relevé de chaque réseau, indiquée dans les réglages.
+
 ## Fonctionnalités
 
-- **Clé API PRIM facultative**, saisie dans l'application (Réglages ou lien sous la liste des
-  modes), avec bouton « Tester ». Elle est stockée uniquement sur le téléphone (sauvegarde Android
+- **Clé API PRIM facultative**, pour l'Île-de-France, saisie dans l'application (Réglages ou lien sous la
+  liste des modes), avec bouton « Tester ». Elle est stockée uniquement sur le téléphone (sauvegarde Android
   désactivée) et n'est jamais envoyée à Tracéo. Vider le champ et enregistrer la retire : les widgets
   reviennent sur le cache de Tracéo. Les réglages indiquent la source active.
   - **Quota du jour** : l'écran de la clé affiche les requêtes PRIM du jour, d'après les en-têtes
@@ -36,17 +68,19 @@ viennent toujours de **PRIM**, la plateforme d'Île-de-France Mobilités, par l'
   - **classement** : le choix fait ici, puis les lignes favorites à moins de 800 m, puis la distance, où le
     métro, le RER et le train comptent 150 m de moins et le tram 75 m. Chaque ligne n'apparaît qu'une fois,
     à son arrêt le plus proche. On garde ce qui reste à moins de 400 m de plus que l'arrêt le plus proche,
-    sans dépasser 2 km. Les Noctiliens ne comptent que de 0 h 30 à 5 h 30. En tête, une ligne sans passage
-    dans l'heure cède sa place à la suivante (3 lignes interrogées au plus) ;
+    sans dépasser 2 km. En Île-de-France, les Noctiliens ne comptent que de 0 h 30 à 5 h 30. En tête, une
+    ligne sans passage dans l'heure cède sa place à la suivante (3 lignes interrogées au plus) ;
   - par défaut, la position n'est lue qu'au toucher du widget ou du bouton « Me localiser » de sa
     notification : les actualisations automatiques gardent le dernier arrêt. Sur option, et avec la
     permission facultative « Toujours autoriser », un widget peut la relire à chaque actualisation (voir
     « Écran de verrouillage »).
-- **Choix de l'arrêt via un menu en 4 étapes** : mode de transport → ligne → arrêt → sens.
-  - Modes : Métro, RER, Train/Transilien, Tramway, Bus/Noctilien, et Câble/Funiculaire avec une clé.
-  - Lignes et arrêts de Tracéo ou, avec une clé, des référentiels open data IDFM
-    (`referentiel-des-lignes`, `arrets-lignes`), avec recherche, pastilles aux couleurs officielles et
-    cache local de 7 jours.
+- **Choix de l'arrêt via un menu en 5 étapes** : réseau → mode de transport → ligne → arrêt → sens.
+  - Modes en Île-de-France : Métro, RER, Train/Transilien, Tramway, Bus/Noctilien, et Câble/Funiculaire
+    avec une clé. Ailleurs, ceux du réseau (voir « Autres réseaux »).
+  - Lignes et arrêts de Tracéo ou, en Île-de-France avec une clé, des référentiels open data IDFM
+    (`referentiel-des-lignes`, `arrets-lignes`), avec recherche, pastilles aux couleurs du réseau et
+    cache local de 7 jours. Le rond du métro et du RER et les filets du tramway sont le code de
+    l'Île-de-France ; ailleurs, la pastille est la même pour tous les modes.
   - **Sens** : l'application lit les prochains passages de l'arrêt choisi et propose les sens observés
     (« Vers Porte de Clignancourt »…), ou « Tous les sens ». Plusieurs sens/destinations peuvent être
     cochés (utile pour les branches du RER), sauf sur les widgets qui n'affichent qu'un sens : Pastille,
@@ -80,9 +114,10 @@ viennent toujours de **PRIM**, la plateforme d'Île-de-France Mobilités, par l'
   Grand chiffre devient Frise ou Un sens, Deux sens et Deux sens avec frise deviennent Deux sens compact
   ou Un sens. Train et voie et Liste des départs rétrécissent d'abord, pour garder la voie et la liste.
 - **Relevé daté** : sans clé, le widget indique l'heure du relevé de Tracéo, pas celle du téléphone, avec
-  la mention « PRIM via Tracéo » si la place le permet, sinon « Tracéo ». Il signale un relevé ancien
-  (plus de 150 s, ce qui est normal entre 2 h et 5 h). Le format Pastille manque de place : il n'indique
-  que l'heure, et la mention reste dans sa description pour les lecteurs d'écran.
+  la mention « PRIM via Tracéo » si la place le permet (le nom du réseau via Tracéo hors Île-de-France),
+  sinon « Tracéo ». Il signale un relevé que Tracéo juge ancien (en Île-de-France, plus de 150 s, ce qui
+  est normal entre 2 h et 5 h). Le format Pastille manque de place : il n'indique que l'heure, et la mention reste dans sa
+  description pour les lecteurs d'écran.
 - **Couleur du widget** : couleur de la ligne par défaut, ou au choix automatique (sombre ou clair selon
   le thème du système), sombre ou clair, y compris en mode automatique, où la couleur suit la ligne
   affichée. La liste reste en sombre ou en clair et démarre en sombre. Le widget À proximité suit le thème
@@ -106,6 +141,14 @@ viennent toujours de **PRIM**, la plateforme d'Île-de-France Mobilités, par l'
     même (processus tué pendant un tick), une alarme répétée toutes les 3 minutes, que chaque tick
     repousse et qu'Android reprogramme lui-même, la relance. Les widgets À proximité et les widgets
     d'une ligne s'actualisent en parallèle : une source lente pour les uns ne retarde pas les autres.
+  - **Économiseur de batterie** : le tick de chaque minute est une alarme « allow-while-idle ». Une
+    alarme ordinaire serait repoussée sans fin dès que l'application passe en arrière-plan, y compris
+    sous l'économiseur « adaptatif » qu'Android active seul ; celle-ci n'est que limitée à un quota
+    horaire (72 sur un Pixel), qu'un tick par minute ne dépasse pas. Un tick avancé sur le prochain
+    relevé de Tracéo reste une alarme ordinaire : sous l'économiseur, il attend, et le tick de la minute
+    fait le travail.
+  - **Données en arrière-plan** : si Android les coupe à l'application (réglage de l'application ou
+    économiseur de données), une carte de l'accueil le signale et mène au réglage.
   - **Toucher** : Android livre le toucher d'un widget en broadcast prioritaire et tue sans prévenir
     l'application qui le garde plus de 10 s. Elle le rend donc au bout de 7 s au plus (40 s pour un
     tick, qui en a 60) ; si le réseau traîne, l'actualisation se termine en dehors, et le widget quitte
@@ -158,9 +201,9 @@ viennent toujours de **PRIM**, la plateforme d'Île-de-France Mobilités, par l'
 2. Sur le téléphone, autoriser l'installation d'applications de sources inconnues puis ouvrir l'APK.
 3. Android 8.0 (API 26) minimum.
 
-## Obtenir une clé API PRIM (facultatif)
+## Obtenir une clé API PRIM (facultatif, Île-de-France)
 
-La clé n'est pas nécessaire. Elle fait interroger PRIM directement par le téléphone, ajoute la voie, le
+La clé n'est pas nécessaire, et ne sert qu'aux widgets d'Île-de-France. Elle fait interroger PRIM directement par le téléphone, ajoute la voie, le
 câble et le funiculaire, et permet une actualisation chaque minute.
 
 1. Créer un compte gratuit sur <https://prim.iledefrance-mobilites.fr>.
@@ -178,8 +221,8 @@ ajoutée et garde son sens.
 
 1. Ajouter le format de son choix sur l'écran d'accueil : appui long → Widgets → Tracéo Live, ou
    bouton « Ajouter un widget » de l'application. Dans les deux cas, la configuration s'ouvre ensuite.
-2. Choisir le mode, la ligne, l'arrêt, le ou les sens et la couleur, puis enregistrer. En mode
-   automatique : choisir la ligne proche puis la couleur, tous les sens étant affichés.
+2. Choisir le réseau, le mode, la ligne, l'arrêt, le ou les sens et la couleur, puis enregistrer. En
+   mode automatique : choisir la ligne proche puis la couleur, tous les sens étant affichés.
 3. Facultatif : la ligne « Écran de verrouillage », au-dessus du bouton d'enregistrement, ou la cloche de la
    carte du widget, règle sa notification, le suivi de la position et la plage horaire.
 
@@ -188,16 +231,22 @@ ajoutée et garde son sens.
 La politique complète est dans [PRIVACY.md](PRIVACY.md), que l'application ouvre aussi depuis Réglages →
 « Politique de confidentialité ». En résumé :
 
-- **Sans clé**, le téléphone envoie à gotraceo.fr la ligne et l'arrêt demandés, et son adresse IP figure
-  dans les journaux du serveur, conservés 14 jours. Pas de compte ni d'identifiant d'appareil.
-- **Avec une clé**, le téléphone interroge directement PRIM et l'open data IDFM. La clé n'est jamais
-  envoyée à Tracéo.
+- **Sans clé, et toujours hors Île-de-France**, le téléphone envoie à gotraceo.fr le réseau, la ligne et
+  l'arrêt demandés, et son adresse IP figure dans les journaux du serveur, conservés 14 jours. Pas de
+  compte ni d'identifiant d'appareil. Les réseaux de transport et Île-de-France Mobilités ne reçoivent
+  aucune requête liée aux widgets : Tracéo relève lui-même leurs données.
+- **Avec une clé**, en Île-de-France, le téléphone interroge directement PRIM et l'open data IDFM. La clé
+  n'est jamais envoyée à Tracéo.
+- **Choix du réseau** : la position approximative, si on l'accorde, est comparée sur le téléphone à la
+  zone de chaque réseau du catalogue de Tracéo. Elle n'est ni envoyée ni enregistrée.
 - **Aucune donnée conservée durablement sur un serveur** : l'application n'a ni compte, ni identifiant
   d'appareil, ni historique en ligne. La seule trace côté serveur est celle décrite plus haut : l'adresse IP
   dans les journaux de gotraceo.fr, effacés au bout de 14 jours.
 - **Position** (mode automatique uniquement) : par défaut, elle est lue seulement quand on touche le widget
   ou le bouton « Me localiser » de sa notification, sans la permission « Toujours autoriser ». Les arrêts
-  proches sont cherchés dans un fichier local : la position n'est envoyée à aucun serveur. Seuls les lignes
+  proches sont cherchés dans l'index local du réseau : la position n'est envoyée à aucun serveur. Hors
+  Île-de-France, l'index d'un réseau est téléchargé chez Tracéo la première fois, ce qui lui indique le
+  réseau, comme le ferait une demande de passages. Seuls les lignes
   et les arrêts retenus partent vers la source de passages, comme pour un widget ordinaire. La dernière
   position et les lieux où une ligne a été choisie restent sur le téléphone.
 - **Permission « Toujours autoriser » (position en arrière-plan)** : entièrement facultative. Elle ne sert
@@ -214,15 +263,27 @@ La politique complète est dans [PRIVACY.md](PRIVACY.md), que l'application ouvr
 | Lignes | `GET https://gotraceo.fr/api/lines` | `https://data.iledefrance-mobilites.fr/api/explore/v2.1/catalog/datasets/referentiel-des-lignes/exports/json` |
 | Arrêts d'une ligne | `GET https://gotraceo.fr/api/stations?line=line:IDFM:Cxxxxx`, à la configuration seulement | `https://data.iledefrance-mobilites.fr/api/explore/v2.1/catalog/datasets/arrets-lignes/exports/json` |
 
+Hors Île-de-France, toujours chez Tracéo, avec les identifiants propres à chaque réseau, transmis tels
+quels :
+
+| Élément | Requête |
+| --- | --- |
+| Catalogue des réseaux | `GET https://gotraceo.fr/api/reseaux` : nom, zone, modes, cadence, état du flux, source et licence de chaque réseau |
+| Lignes | `GET https://gotraceo.fr/api/reseaux/{réseau}/lines` |
+| Arrêts d'une ligne | `GET https://gotraceo.fr/api/reseaux/{réseau}/stations?line=…`, à la configuration seulement |
+| Index des arrêts | `GET https://gotraceo.fr/api/reseaux/{réseau}/index`, pour le mode automatique, À proximité et les arrêts de même nom |
+| Passages | `GET https://gotraceo.fr/api/reseaux/{réseau}/passages?line=…&stop=…` |
+
 - Les identifiants du référentiel sont convertis en `MonitoringRef` SIRI :
   `IDFM:monomodalStopPlace:58879` (zone d'arrêt, lignes ferrées) → `STIF:StopArea:SP:58879:`,
   `IDFM:463158` (arrêt/quai) → `STIF:StopPoint:Q:463158:`. Si PRIM refuse un identifiant ou le couple
   MonitoringRef/LineRef, le client essaie l'autre format puis la requête sans `LineRef` (filtrage de
   la ligne en local). Une zone d'arrêt de Tracéo, `stop_area:IDFM:71348`, devient
   `STIF:StopArea:SP:71348:`.
-- Sur la source Tracéo, les arrivées au terminus sont retirées. Un 429 ou un 503 garde les dernières
-  données ; un 503 redemande au plus une fois par ligne et par processus les arrêts de la ligne, puis
-  réessaie une fois. Un 404 demande de reconfigurer le widget.
+- Sur la source Tracéo, en Île-de-France, les arrivées au terminus sont retirées ; pour les autres
+  réseaux, Tracéo les a déjà retirées. Un 429 ou un 503 garde les dernières données ; un 503 redemande
+  au plus une fois par ligne et par processus les arrêts de la ligne, puis réessaie une fois. Un 404
+  demande de reconfigurer le widget, en disant ce qui manque : le réseau, la ligne ou l'arrêt.
 - Les arrêts de même nom dans la même commune (un quai par sens) sont regroupés ; le choix du sens
   détermine le(s) quai(s) interrogé(s) et, pour les zones d'arrêt ferroviaires, les directions
   (`DirectionName`, sinon `DestinationName`) retenues.
@@ -236,13 +297,17 @@ La politique complète est dans [PRIVACY.md](PRIVACY.md), que l'application ouvr
   le réseau mobile, et l'ancien reste utilisé en cas d'échec. Une zone (`arrid` → `zdaid` → `zdcid`) devient
   `stop_area:IDFM:zdcid`, compris par Tracéo et par PRIM. Le temps de lecture de la position est écrit dans
   les journaux Android : `adb logcat -s TRWidget`.
+- **Index des autres réseaux** : servi tout compilé par Tracéo (quelques dizaines de Ko par réseau), il
+  garde pour chaque ligne si elle a du temps réel. Il est téléchargé la première fois qu'il sert,
+  renouvelé quand le catalogue annonce de nouveaux horaires (`indexAt`), et supprimé au bout de 30 jours
+  sans servir si aucun widget n'est posé sur ce réseau.
 - Application 100 % Kotlin, sans AndroidX : widget dessiné en image (`Canvas`, car Android ignore les
   polices de l'application dans le texte natif d'un widget) et transmis via `RemoteViews`, interface
   en vues Android natives, coroutines Kotlin, `HttpURLConnection` + `org.json`.
 
 ```
 app/src/main/java/fr/gotraceo/live/
-├── data/     modèles, clients Tracéo et PRIM (SIRI), choix de la source, parseur SIRI Lite, référentiel IDFM, sens, préférences, index des arrêts, règles du mode automatique, position
+├── data/     modèles, catalogue des réseaux et leurs mentions, clients Tracéo et PRIM (SIRI), choix de la source, parseur SIRI Lite, référentiel IDFM, sens, préférences, index des arrêts, règles du mode automatique, position
 ├── widget/   AppWidgetProvider, choix du format et des couleurs, dessin, actualisation et planification, mode automatique et son service
 └── ui/       accueil, galerie des formats, réglages, clé API, sources et licences, assistant de configuration et feuille de choix des lignes proches
 ```
@@ -257,6 +322,11 @@ le Play Store : affichage bord à bord sur tous les écrans et geste retour pré
 ./gradlew assembleRelease     # APK : app/build/outputs/apk/release/app-release.apk
 ./gradlew bundleRelease       # bundle Google Play : app/build/outputs/bundle/release/app-release.aab
 ```
+
+Un build de release ne connaît que la production de Tracéo (`https://gotraceo.fr`). Un build de debug
+peut viser une autre adresse, pour un essai : clé `traceo.debugUrl` de `local.properties`, fichier que
+git ne suit pas. Si cette adresse est en `http://`, le build de debug, et lui seul, accepte le HTTP sans
+chiffrement.
 
 ### Signature
 
@@ -312,6 +382,23 @@ License 1.1 ([texte de la licence](app/src/main/assets/licenses/barlow-OFL.txt))
 
 ## Données
 
+### Autres réseaux
+
+Les données de chaque réseau appartiennent à son producteur (l'autorité organisatrice ou l'exploitant),
+qui les publie en données ouvertes. [Tracéo](https://gotraceo.fr) les relève, les met en forme (lignes,
+arrêts regroupés en stations, prochains passages) et les sert à l'application. Chaque réseau a sa propre
+licence, en général la
+[Licence Ouverte 2.0](https://www.etalab.gouv.fr/licence-ouverte-open-licence) ou
+l'[Open Database License (ODbL)](https://opendatacommons.org/licenses/odbl/1-0/) : Tracéo la donne dans
+son catalogue, avec la mention à citer et la date du jeu de données.
+
+L'application cite ces mentions là où les données s'affichent : sur l'accueil, à chaque étape de la
+configuration et dans la feuille des lignes proches, pour les réseaux concernés. L'écran « Sources et
+licences » les détaille pour chaque réseau affiché. L'index des arrêts d'un réseau reste sur le
+téléphone : il n'est pas redistribué.
+
+### Île-de-France
+
 Données © Île-de-France Mobilités, via [Tracéo](https://gotraceo.fr) (gotraceo.fr) : sans clé, Tracéo
 interroge l'API PRIM et met ses réponses en cache.
 
@@ -346,5 +433,6 @@ DGCL - BANATIC, MEFR, MAA. L'index compilé reste sur le téléphone : il n'est 
 Une mention courte, avec ses liens, figure sur l'accueil, à chaque étape de la configuration et dans la feuille
 des lignes proches. L'écran « Sources et licences » donne le détail par jeu de données.
 
-Cette application n'est pas affiliée à Île-de-France Mobilités. Sans clé, [Tracéo](https://gotraceo.fr) lui
-fournit les données PRIM.
+Cette application n'est affiliée ni à Île-de-France Mobilités, ni aux autres réseaux de transport. Sans
+clé, [Tracéo](https://gotraceo.fr) lui fournit les données PRIM ; hors Île-de-France, celles de chaque
+réseau.
